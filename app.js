@@ -311,6 +311,7 @@ function route() {
   } catch (e) { console.error(e); html = `<div class="empty">Algo deu errado ao montar esta tela.</div>`; }
   view.innerHTML = html;
   window.scrollTo(0, 0);
+  afterRender(view);
 }
 addEventListener('hashchange', route);
 
@@ -345,6 +346,91 @@ function buildAlerts() {
   }
   return out;
 }
+/* ---- gráficos interativos (SVG puro, sem bibliotecas) ---- */
+const CH = { W: 640, H: 240, L: 14, R: 14, T: 20, B: 30 };
+function smoothPath(pts, base) {
+  if (pts.length < 2) return '';
+  const f = (n) => n.toFixed(1);
+  let d = `M${f(pts[0][0])},${f(pts[0][1])}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+    const y1 = Math.min(base, p1[1] + (p2[1] - p0[1]) / 6), y2 = Math.min(base, p2[1] - (p3[1] - p1[1]) / 6);
+    d += `C${f(p1[0] + (p2[0] - p0[0]) / 6)},${f(y1)} ${f(p2[0] - (p3[0] - p1[0]) / 6)},${f(y2)} ${f(p2[0])},${f(p2[1])}`;
+  }
+  return d;
+}
+function chartInner() {
+  const { W, H, L, R, T, B } = CH, ms = S.chart.months, n = ms.length, base = H - B;
+  const on = S.series;
+  const max = Math.max(1, ...ms.flatMap((m) => [on.r ? m.r : 0, on.e ? m.e : 0]));
+  const step = (W - L - R) / (n - 1);
+  const xs = ms.map((_, i) => L + i * step);
+  const y = (v) => T + (base - T) * (1 - v / max);
+  const ys = { r: ms.map((m) => y(m.r)), e: ms.map((m) => y(m.e)) };
+  Object.assign(S.chart, { xs, ys, step });
+  const pr = xs.map((x, i) => [x, ys.r[i]]), pe = xs.map((x, i) => [x, ys.e[i]]);
+  const lr = smoothPath(pr, base), le = smoothPath(pe, base);
+  const grid = [0, 1, 2, 3].map((i) => { const gy = T + ((base - T) * i) / 3; return `<line class="gl" x1="${L}" x2="${W - R}" y1="${gy}" y2="${gy}"/>`; }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Recebido e despesas dos últimos meses">
+    <defs><linearGradient id="gAr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff2b3d" stop-opacity=".5"/><stop offset="1" stop-color="#ff2b3d" stop-opacity="0"/></linearGradient>
+    <linearGradient id="gLn" x1="0" x2="1"><stop offset="0" stop-color="#ff7a86"/><stop offset="1" stop-color="#ff2b3d"/></linearGradient></defs>
+    ${grid}
+    <rect id="cv-bar" x="0" y="${T - 6}" width="${step * 0.8}" height="${base - T + 6}" rx="${step * 0.4}"/>
+    ${on.r ? `<path class="ar" d="${lr}L${xs[n - 1]},${base}L${xs[0]},${base}Z" fill="url(#gAr)"/><path class="ln r" pathLength="1" d="${lr}"/>` : ''}
+    ${on.e ? `<path class="ln e" pathLength="1" d="${le}"/>` : ''}
+    ${ms.map((m, i) => `<text class="ax" x="${xs[i]}" y="${H - 8}">${esc(m.n)}</text>`).join('')}
+    <g class="sc" id="cv-sc"><line id="cv-line" y1="${T - 6}" y2="${base}" stroke="rgba(255,255,255,.18)" stroke-dasharray="3 4"/>
+    ${on.r ? '<circle class="dot r" id="cv-dr" r="6"/>' : ''}${on.e ? '<circle class="dot e" id="cv-de" r="5"/>' : ''}</g>
+    <rect class="hit" x="0" y="0" width="${W}" height="${H}"/></svg>
+    <div class="tip" id="cv-tip"></div>`;
+}
+function setChartIndex(i) {
+  const c = S.chart, svg = $('#chart svg');
+  if (!svg || !c.xs) return;
+  i = Math.max(0, Math.min(c.months.length - 1, i));
+  c.i = i;
+  const x = c.xs[i], m = c.months[i];
+  $('#cv-bar')?.setAttribute('x', x - c.step * 0.4);
+  const line = $('#cv-line'); if (line) { line.setAttribute('x1', x); line.setAttribute('x2', x); }
+  for (const [id, k] of [['cv-dr', 'r'], ['cv-de', 'e']]) { const d = $('#' + id); if (d) { d.setAttribute('cx', x); d.setAttribute('cy', c.ys[k][i]); } }
+  document.querySelectorAll('#chart .ax').forEach((a, j) => a.classList.toggle('on', j === i));
+  const tip = $('#cv-tip');
+  tip.innerHTML = `<b>${esc(m.full)}</b>${S.series.r ? `<span><i></i>Recebido ${brl(m.r)}</span>` : ''}${S.series.e ? `<span class="e"><i></i>Despesas ${brl(m.e)}</span>` : ''}`;
+  const w = tip.offsetWidth, cw = $('#chart').clientWidth;
+  tip.style.left = Math.max(w / 2, Math.min(cw - w / 2, (x / CH.W) * cw)) + 'px';
+  const top = Math.min(...['r', 'e'].filter((k) => S.series[k]).map((k) => c.ys[k][i]));
+  tip.style.top = Math.max(0, (top / CH.H) * svg.clientHeight - tip.offsetHeight - 6) + 'px';
+}
+const DONUT_COLORS = ['#ff2b3d', '#ff5a6b', '#ff8a8f', '#ffa86a', '#ffd08a', '#f4f1f1', '#9a9299'];
+function donutHTML(active) {
+  const counts = STAGES.map(([k, n], i) => ({ k, n, c: active.filter((p) => p.stage === k).length, col: DONUT_COLORS[i % DONUT_COLORS.length], i }));
+  const total = counts.reduce((a, x) => a + x.c, 0), C = 2 * Math.PI * 58, gap = total > 1 ? 5 : 0;
+  let acc = 0;
+  const segs = total ? counts.filter((x) => x.c).map((x) => {
+    const len = (x.c / total) * C, vis = Math.max(0, len - gap);
+    const s = `<circle class="seg" data-seg="${x.i}" data-n="${esc(x.n)}" data-c="${x.c}" cx="80" cy="80" r="58" style="color:${x.col};stroke:${x.col};animation-delay:${x.i * 70}ms" stroke-dasharray="${vis.toFixed(1)} ${(C - vis).toFixed(1)}" stroke-dashoffset="${(-acc).toFixed(1)}"/>`;
+    acc += len; return s;
+  }).join('') : '';
+  return `<div class="donut"><svg viewBox="0 0 160 160" role="img" aria-label="Projetos por etapa"><circle class="trk" cx="80" cy="80" r="58"/>${segs}
+    <text class="dn" id="dn-n" x="80" y="84">${total}</text><text class="dl" id="dn-l" x="80" y="102" data-d="em andamento">em andamento</text></svg>
+    <div class="dlist">${counts.map((x) => `<a href="#/projetos" data-action="filter-stage" data-stage="${x.k}" data-seg="${x.i}"><i style="background:${x.col};box-shadow:0 0 8px ${x.col}"></i>${esc(x.n)}<span>${x.c}</span></a>`).join('')}</div></div>`;
+}
+function miniProjects(active) {
+  const list = [...active].sort((a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999')).slice(0, 3);
+  if (!list.length) return '<div class="empty" style="grid-column:1/-1">Nenhum projeto em andamento.</div>';
+  const C = 2 * Math.PI * 32, t = today();
+  return list.map((p, i) => {
+    const pct = Math.round((Math.max(0, STAGES.findIndex(([k]) => k === p.stage)) / (STAGES.length - 1)) * 100);
+    const cl = clientOf(p.client_id);
+    let badge = '<span class="badge">Sem prazo</span>';
+    if (p.due_date) {
+      const d = Math.round((new Date(p.due_date + 'T12:00:00') - new Date(t + 'T12:00:00')) / 864e5);
+      badge = d < 0 ? `<span class="badge bad">${-d} dia${d === -1 ? '' : 's'} atrasado</span>` : `<span class="badge ${d <= 7 ? 'mid' : 'ok'}">${d === 0 ? 'Vence hoje' : d + ' dia' + (d === 1 ? '' : 's')}</span>`;
+    }
+    return `<a class="card pc reveal" style="--i:${i + 4}" href="#/projetos/${p.id}"><div class="ring"><svg viewBox="0 0 78 78"><defs><linearGradient id="gRing${i}" x1="0" x2="1"><stop offset="0" stop-color="#ff7a86"/><stop offset="1" stop-color="#ff2b3d"/></linearGradient></defs><circle class="t" cx="39" cy="39" r="32"/><circle class="p" cx="39" cy="39" r="32" stroke="url(#gRing${i})" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - pct / 100)).toFixed(1)}" style="--c:${C.toFixed(1)}"/></svg><b>${pct}%</b></div>
+      <div class="nm">${esc(p.name)}</div><div class="cl">${esc(cl?.name || '')} · ${esc(STAGES.find(([k]) => k === p.stage)?.[1] || '')}</div>${badge}</a>`;
+  }).join('');
+}
 function vDashboard() {
   const start = periodStart(S.period);
   const inP = (d) => d && String(d).slice(0, 10) >= start;
@@ -355,37 +441,81 @@ function vDashboard() {
   const delivered = S.projects.filter((p) => p.published_at && inP(p.published_at)).length;
   const newCli = S.clients.filter((c) => inP(ymd(new Date(c.created_at)))).length;
   const months = [];
-  for (let i = 5; i >= 0; i--) {
+  for (let i = 11; i >= 0; i--) {
     const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i);
     const k = ymd(d).slice(0, 7);
-    months.push({ k, n: d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''),
+    months.push({ k, n: d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''), full: d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }),
       r: sum(S.payments.filter((p) => p.paid_at && p.paid_at.slice(0, 7) === k), (p) => p.amount),
       e: sum(S.expenses.filter((x) => x.spent_at.slice(0, 7) === k), (x) => x.amount) });
   }
-  const max = Math.max(1, ...months.flatMap((m) => [m.r, m.e]));
+  S.series = S.series || { r: true, e: true };
+  S.chart = { months, i: months.length - 1 };
   const active = S.projects.filter((p) => !isDone(p));
   const al = buildAlerts();
   const per = [['semana', 'Semana'], ['mes', 'Mês'], ['ano', 'Ano'], ['total', 'Total']];
-  return `<div class="page-h"><h1>Painel</h1></div>
-  <div class="tabs">${per.map(([k, n]) => `<button class="tab ${S.period === k ? 'on' : ''}" data-action="period" data-p="${k}">${n}</button>`).join('')}</div>
-  <div class="grid g4">
-    <div class="stat"><div class="k">Faturamento</div><div class="v pos">${brl(rev)}</div></div>
-    <div class="stat"><div class="k">Despesas</div><div class="v">${brl(exp)}</div></div>
-    <div class="stat"><div class="k">Lucro</div><div class="v ${rev - exp < 0 ? 'neg' : ''}">${brl(rev - exp)}</div></div>
-    <div class="stat"><div class="k">A receber (total)</div><div class="v warn">${brl(receivable)}</div></div>
-    <div class="stat"><div class="k">Projetos novos</div><div class="v">${newProj}</div></div>
-    <div class="stat"><div class="k">Entregues</div><div class="v">${delivered}</div></div>
-    <div class="stat"><div class="k">Clientes novos</div><div class="v">${newCli}</div></div>
-    <div class="stat"><div class="k">Em andamento</div><div class="v">${active.length}</div></div>
-  </div>
-  <div class="section"><h2>Alertas</h2></div>
-  ${al.length ? `<div class="stack">${al.map((a) => `<a class="card alert ${a.lvl === 'bad' ? 'bad' : ''}" href="${esc(a.href)}">${esc(a.txt)}</a>`).join('')}</div>` : '<div class="empty">Nada pendente. 🎉</div>'}
-  <div class="section"><h2>Últimos 6 meses</h2></div>
-  <div class="card"><div class="bars">${months.map((m) => `<div class="m"><div class="pair"><div class="b" style="height:${Math.round((m.r / max) * 100)}%" title="${brl(m.r)}"></div><div class="b e" style="height:${Math.round((m.e / max) * 100)}%" title="${brl(m.e)}"></div></div><span>${esc(m.n)}</span></div>`).join('')}</div>
-  <div class="legend"><span><i></i>Recebido</span><span><i class="e"></i>Despesas</span></div></div>
-  <div class="section"><h2>Projetos por etapa</h2></div>
-  <div class="card stack">${STAGES.map(([k, n]) => { const c = active.filter((p) => p.stage === k).length; return `<a class="item" href="#/projetos" data-action="filter-stage" data-stage="${k}"><span>${n}</span><span class="badge">${c}</span></a>`; }).join('')}</div>`;
+  const cnt = (v, kind = 'brl') => `<span data-count="${v}" data-kind="${kind}">${kind === 'brl' ? brl(v) : v}</span>`;
+  return `<div class="page-h reveal"><div><div class="eyebrow">Visão geral</div><h1>Painel</h1></div>
+  <div class="tabs">${per.map(([k, n]) => `<button class="tab ${S.period === k ? 'on' : ''}" data-action="period" data-p="${k}">${n}</button>`).join('')}</div></div>
+  <div class="dash">
+    <section class="card hero reveal" style="--i:1"><div class="hero-h"><h2>Recebido x despesas</h2>
+      <div class="row" style="gap:6px"><button class="sbtn ${S.series.r ? '' : 'off'}" data-action="series" data-s="r"><i></i>Recebido</button><button class="sbtn e ${S.series.e ? '' : 'off'}" data-action="series" data-s="e"><i></i>Despesas</button></div></div>
+      <div class="chart" id="chart">${chartInner()}</div>
+      <div class="hero-stats"><div class="hs"><div class="k">Faturamento</div><div class="v pos">${cnt(rev)}</div></div>
+        <div class="hs mid"><div class="k">Lucro</div><div class="v ${rev - exp < 0 ? 'neg' : ''}">${cnt(rev - exp)}</div></div>
+        <div class="hs"><div class="k">A receber</div><div class="v warn">${cnt(receivable)}</div></div></div></section>
+    <div class="side">
+      <div class="tiles">
+        <a class="tile red reveal" style="--i:2" href="#/projetos"><div class="ic"><svg viewBox="0 0 24 24">${ICON.projetos}</svg></div><div><div class="n">${cnt(active.length, 'int')}</div><div class="l">Projetos em andamento</div></div></a>
+        <div class="tile reveal" style="--i:3"><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3 2.5 20h19z"/><path d="M12 10v4M12 17.5h0"/></svg></div><div><div class="n ${al.length ? 'neg' : ''}">${cnt(al.length, 'int')}</div><div class="l">Alertas pendentes</div></div></div>
+      </div>
+      <section class="card donut-card reveal" style="--i:4"><h2>Projetos por etapa</h2>${donutHTML(active)}</section>
+    </div>
+    <div class="grid g4 stats">
+      <div class="stat reveal" style="--i:3"><div class="k">Despesas</div><div class="v">${cnt(exp)}</div></div>
+      <div class="stat reveal" style="--i:4"><div class="k">Projetos novos</div><div class="v">${cnt(newProj, 'int')}</div></div>
+      <div class="stat reveal" style="--i:5"><div class="k">Entregues</div><div class="v">${cnt(delivered, 'int')}</div></div>
+      <div class="stat reveal" style="--i:6"><div class="k">Clientes novos</div><div class="v">${cnt(newCli, 'int')}</div></div>
+    </div>
+    <div class="mini">${miniProjects(active)}</div>
+    <section class="alerts reveal" style="--i:5"><div class="section" style="margin-top:4px"><h2>Alertas</h2></div>
+      ${al.length ? `<div class="stack">${al.map((a) => `<a class="card alert ${a.lvl === 'bad' ? 'bad' : ''}" href="${esc(a.href)}">${esc(a.txt)}</a>`).join('')}</div>` : '<div class="empty">Nada pendente.</div>'}</section>
+  </div>`;
 }
+/* animações e interação pós-render */
+function animateCounts(root) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  root.querySelectorAll('[data-count]').forEach((el) => {
+    const to = Number(el.dataset.count), fmt = el.dataset.kind === 'brl' ? brl : (v) => String(Math.round(v));
+    if (!isFinite(to)) return;
+    const t0 = performance.now(), dur = 900;
+    const tick = (t) => { const p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3); el.textContent = fmt(to * e); if (p < 1 && el.isConnected) requestAnimationFrame(tick); else el.textContent = fmt(to); };
+    requestAnimationFrame(tick);
+  });
+}
+function afterRender(view) {
+  animateCounts(view);
+  if (S.chart && $('#chart')) requestAnimationFrame(() => setChartIndex(S.chart.i));
+}
+document.addEventListener('pointermove', (e) => {
+  const t = e.target;
+  if (!t.closest) return;
+  const g = t.closest('.card,.stat,.tile,.btn,.panel');
+  if (g) { const r = g.getBoundingClientRect(); g.style.setProperty('--mx', e.clientX - r.left + 'px'); g.style.setProperty('--my', e.clientY - r.top + 'px'); }
+  if (t.closest('#chart') && S.chart?.xs) { const r = $('#chart svg').getBoundingClientRect(); setChartIndex(Math.round((((e.clientX - r.left) / r.width) * CH.W - CH.L) / S.chart.step)); }
+  const nEl = $('#dn-n'), lEl = $('#dn-l');
+  if (!nEl) return;
+  const hot = t.closest('[data-seg]');
+  document.querySelectorAll('.donut .hot').forEach((x) => { if (!hot || x.dataset.seg !== hot.dataset.seg) x.classList.remove('hot'); });
+  if (hot) {
+    document.querySelectorAll(`.donut [data-seg="${hot.dataset.seg}"]`).forEach((x) => x.classList.add('hot'));
+    const s = $(`.donut .seg[data-seg="${hot.dataset.seg}"]`);
+    nEl.textContent = s ? s.dataset.c : '0';
+    lEl.textContent = s ? s.dataset.n : (STAGES[hot.dataset.seg]?.[1] || '');
+  } else {
+    nEl.textContent = S.projects.filter((p) => !isDone(p)).length;
+    lEl.textContent = lEl.dataset.d;
+  }
+});
 
 /* ============ clientes ============ */
 function vClients() {
@@ -800,6 +930,15 @@ const act = {
   'disable-bio': () => guard(async () => { await V.disableBiometric(); toast('Biometria desativada'); route(); }),
   'change-pw': () => openModal('Trocar senha', `<form data-form="changepw" class="stack"><label>Nova senha (12+ caracteres)<input name="pw" type="password" autocomplete="new-password" minlength="12" required></label><label>Repita<input name="pw2" type="password" autocomplete="new-password" minlength="12" required></label><button class="btn primary">Trocar</button></form>`),
   export: () => guard(exportAll),
+  series: (el) => {
+    S.series = S.series || { r: true, e: true };
+    const k = el.dataset.s, other = k === 'r' ? 'e' : 'r';
+    if (S.series[k] && !S.series[other]) return toast('Deixe pelo menos uma série ligada.', true);
+    S.series[k] = !S.series[k];
+    el.classList.toggle('off', !S.series[k]);
+    $('#chart').innerHTML = chartInner();
+    setChartIndex(S.chart.i);
+  },
 };
 async function setStage(p, stage) {
   const patch = { stage };

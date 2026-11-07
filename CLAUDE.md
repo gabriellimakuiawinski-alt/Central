@@ -8,6 +8,11 @@ App pessoal (PWA) do Gabriel para organizar o trabalho de criação de sites: cl
 - Backend: Supabase, projeto **Central** (ref `llpbtrobjfszgzlvdogr`, região sa-east-1, plano gratuito). URL e chave publishable estão em `config.js` (a chave pública é feita para ficar no navegador).
 - Hospedagem: GitHub Pages, publicado em https://gabriellimakuiawinski-alt.github.io/central/ (repo gabriellimakuiawinski-alt/central, branch main, pasta raiz). Primeiro cadastro já feito (a vaga única está ocupada).
 
+## Visual
+- Tema "vidro líquido" preto com luz vermelha (referência: dashboard roxo com cartões de vidro). Fundo `.aurora` animado, cartões com `backdrop-filter`, brilho que segue o cursor (`--mx/--my`).
+- Painel com gráficos em SVG puro e interativos (linha recebido x despesas com tooltip, rosca por etapa, anéis de progresso) e contadores animados. Sem bibliotecas: a CSP só aceita scripts de 'self'.
+- Respeita `prefers-reduced-motion`.
+
 ## Decisões já tomadas
 - Login principal: e-mail + senha + 2FA TOTP. Biometria (WebAuthn) é só atalho de desbloqueio no celular; o login normal sempre funciona.
 - O banco exige sessão `aal2` (2FA) em todas as tabelas (política restritiva), RLS por `user_id`, e um trigger em `auth.users` aceita apenas 1 usuário.
