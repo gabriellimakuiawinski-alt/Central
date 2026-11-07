@@ -29,9 +29,10 @@ vault_keys, clients, projects, project_services, payments, expenses, project_lin
 - Chave de recuperação do cofre guardada offline, fora do celular.
 - 2FA TOTP ativo; biometria testada no celular (o login normal deve continuar funcionando).
 - App instalado na tela inicial do celular.
-- Testar que o cadastro de um segundo usuário é bloqueado.
+- Cadastro de segundo usuário: trigger `apenas_um_usuario` em auth.users conferido e ativo.
+- Supabase advisor: só resta "Leaked Password Protection" desligado (precisa de plano Pro; ignorar no plano gratuito).
 
 ## Pendências / ideias para a fase 2 (em ordem de utilidade)
-1. Restaurar backup dentro do app (hoje só exporta JSON, então o backup ainda não é utilizável).
+1. ~~Restaurar backup dentro do app~~ FEITO (Ajustes > Backup > Restaurar de arquivo; mescla por id via upsert, não apaga, não mexe no cofre). Ainda não testado com login real.
 2. Envio automático do backup para o Google Drive (exige credencial OAuth do Google).
 3. Pix/boleto automático, Gmail, status de deploy do GitHub, cobrança recorrente de manutenção.

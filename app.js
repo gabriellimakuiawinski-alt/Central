@@ -654,7 +654,9 @@ function vSettings() {
     <div class="item"><div><div class="t">Bloquear agora</div><div class="muted small">Bloqueia sozinho após 5 min parado ou 1 min em segundo plano.</div></div><button class="btn sm" data-action="lock">Bloquear</button></div>
   </div>
   <div class="section"><h2>Backup</h2></div>
-  <div class="card stack"><p class="muted small" style="margin:0">Gera um arquivo com todos os dados (senhas continuam criptografadas). No celular, escolha “Drive” no menu de compartilhar para guardar lá.</p><button class="btn" data-action="export">Exportar tudo</button></div>
+  <div class="card stack"><p class="muted small" style="margin:0">Gera um arquivo com todos os dados (senhas continuam criptografadas). No celular, escolha “Drive” no menu de compartilhar para guardar lá.</p><button class="btn" data-action="export">Exportar tudo</button>
+    <p class="muted small" style="margin:0">Restaurar: lê um arquivo de backup e recoloca os registros (mescla com o que já existe, não apaga nada). Senhas só abrem se o backup for da mesma conta/cofre.</p>
+    <label class="btn" style="text-align:center;cursor:pointer">Restaurar de arquivo<input type="file" accept="application/json,.json" data-action-change="restore-file" hidden></label></div>
   <div class="section"><h2>Conta</h2></div>
   <div class="card item"><div><div class="t">${esc(S.user?.email || '')}</div><div class="muted small">Sair apaga a biometria deste aparelho.</div></div><button class="btn sm danger" data-action="logout">Sair</button></div>`;
 }
@@ -671,6 +673,35 @@ async function exportAll() {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   toast('Backup baixado');
+}
+
+const RESTORE_ORDER = ['clients', 'projects', 'project_services', 'payments', 'expenses', 'project_links', 'activity_log'];
+async function restoreBackup(file) {
+  if (!file) return;
+  if (file.size > 20 * 1024 * 1024) return toast('Arquivo grande demais para ser um backup do Central.', true);
+  let dump;
+  try { dump = JSON.parse(await file.text()); } catch { return toast('Arquivo inválido (não é JSON).', true); }
+  if (dump?.app !== 'central' || typeof dump.tables !== 'object' || !dump.tables) return toast('Este arquivo não é um backup do Central.', true);
+  const t = dump.tables;
+  for (const k of [...RESTORE_ORDER, 'app_settings']) {
+    if (k === 'app_settings' ? (t[k] != null && typeof t[k] !== 'object') : (t[k] != null && !Array.isArray(t[k]))) return toast('Backup com formato inesperado: ' + k, true);
+  }
+  const resumo = RESTORE_ORDER.map((k) => `${(t[k] || []).length} ${k.replace('_', ' ')}`).join(', ');
+  if (!(await confirmModal(`Restaurar backup de ${fmtDate((dump.exported_at || '').slice(0, 10))}? (${resumo}). Registros com o mesmo id serão sobrescritos; nada é apagado.`))) return;
+  const uid = S.user.id;
+  for (const k of RESTORE_ORDER) {
+    const rows = (t[k] || []).map((r) => ({ ...r, user_id: uid }));
+    for (let i = 0; i < rows.length; i += 200) {
+      const r = await sb.from(k).upsert(rows.slice(i, i + 200), { onConflict: 'id' });
+      if (r.error) throw new Error(`Falha em ${k}: ${r.error.message}`);
+    }
+  }
+  if (t.app_settings) {
+    const r = await sb.from('app_settings').upsert({ ...t.app_settings, user_id: uid }, { onConflict: 'user_id' });
+    if (r.error) throw new Error('Falha em app_settings: ' + r.error.message);
+  }
+  await refresh();
+  toast('Backup restaurado');
 }
 
 /* ============ ações (cliques) ============ */
@@ -786,6 +817,7 @@ document.addEventListener('change', (e) => {
   const el = e.target.closest('[data-action-change]');
   if (!el) return;
   if (el.dataset.actionChange === 'pfilter') { S.pfilter = el.value; route(); }
+  if (el.dataset.actionChange === 'restore-file') { const f = el.files?.[0]; el.value = ''; guard(() => restoreBackup(f)); }
   if (el.dataset.actionChange === 'stage') guard(() => setStage(projectOf(el.dataset.id), el.value));
 });
 $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(null); });
