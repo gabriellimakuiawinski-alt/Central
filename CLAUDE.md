@@ -6,7 +6,7 @@ App pessoal (PWA) do Gabriel para organizar o trabalho de criação de sites: cl
 - Front-end estático, sem build: `index.html`, `app.js` (telas e lógica), `crypto.js` (cofre e biometria), `styles.css`, `sw.js`, `manifest.webmanifest`.
 - `vendor/supabase.js` é o supabase-js v2 (UMD) copiado localmente (a CSP só permite scripts de 'self').
 - Backend: Supabase, projeto **Central** (ref `llpbtrobjfszgzlvdogr`, região sa-east-1, plano gratuito). URL e chave publishable estão em `config.js` (a chave pública é feita para ficar no navegador).
-- Hospedagem prevista: GitHub Pages (conta gabriellimakuiawinski-alt). Ainda não publicado.
+- Hospedagem: GitHub Pages, publicado em https://gabriellimakuiawinski-alt.github.io/central/ (repo gabriellimakuiawinski-alt/central, branch main, pasta raiz). Primeiro cadastro já feito (a vaga única está ocupada).
 
 ## Decisões já tomadas
 - Login principal: e-mail + senha + 2FA TOTP. Biometria (WebAuthn) é só atalho de desbloqueio no celular; o login normal sempre funciona.
@@ -24,8 +24,14 @@ vault_keys, clients, projects, project_services, payments, expenses, project_lin
 - Mudou o schema? Use migração e rode os advisors de segurança do Supabase.
 - Ao publicar nova versão, aumente o nome do cache em `sw.js`.
 
-## Pendências / ideias para a fase 2
-- Publicar no GitHub Pages e fazer o primeiro cadastro logo em seguida (o primeiro usuário ocupa a vaga única).
-- Restaurar backup dentro do app (hoje só exporta JSON).
-- Envio automático do backup para o Google Drive (exige credencial OAuth do Google).
-- Pix/boleto automático, Gmail, status de deploy do GitHub, cobrança recorrente de manutenção.
+## Checklist de configuração (confirmar)
+- Supabase > Authentication > URL Configuration: Site URL = a URL publicada acima (senão e-mails de confirmação/redefinição apontam para o lugar errado).
+- Chave de recuperação do cofre guardada offline, fora do celular.
+- 2FA TOTP ativo; biometria testada no celular (o login normal deve continuar funcionando).
+- App instalado na tela inicial do celular.
+- Testar que o cadastro de um segundo usuário é bloqueado.
+
+## Pendências / ideias para a fase 2 (em ordem de utilidade)
+1. Restaurar backup dentro do app (hoje só exporta JSON, então o backup ainda não é utilizável).
+2. Envio automático do backup para o Google Drive (exige credencial OAuth do Google).
+3. Pix/boleto automático, Gmail, status de deploy do GitHub, cobrança recorrente de manutenção.
