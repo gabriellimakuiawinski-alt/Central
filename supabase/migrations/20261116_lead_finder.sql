@@ -320,3 +320,12 @@ begin
 end $$;
 revoke execute on function public.lf_begin_search(text, jsonb) from public, anon;
 grant execute on function public.lf_begin_search(text, jsonb) to authenticated;
+
+-- Etapas 3 e 4
+alter table public.lf_companies
+  add column if not exists site_confirmed text check (site_confirmed in ('sem_site','tem_site')),
+  add column if not exists site_analysis jsonb;
+alter table public.lf_settings
+  add column if not exists sender_name text check (char_length(sender_name) <= 80),
+  add column if not exists max_analyses_per_hour int not null default 30 check (max_analyses_per_hour between 1 and 60),
+  add column if not exists auto_analyze boolean not null default true;

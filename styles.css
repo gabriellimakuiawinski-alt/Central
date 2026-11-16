@@ -272,3 +272,17 @@ a.tile:hover{transform:translateY(-3px)}
 @media(max-width:899px){
   .lf-table td[data-l="Origem"],.lf-table td[data-l="Pontos"],.lf-table td[data-l="Atualizado"]{display:none}
 }
+.lf-banner>.card{margin-bottom:12px}
+.lf-score{font-size:2.4rem;font-weight:800;line-height:1;margin-top:4px;font-variant-numeric:tabular-nums}
+.lf-score small{font-size:.95rem;font-weight:600;color:var(--muted)}
+.lf-parts{display:grid;gap:12px;margin-top:14px;font-size:.92rem}
+.lf-bar{height:6px;border-radius:3px;background:rgba(255,255,255,.1);overflow:hidden;margin:5px 0}
+.lf-bar i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,#ff2b3d,#ff6577)}
+.lf-funnel{display:grid;gap:8px;margin-top:10px;font-size:.88rem}
+.lf-funnel>div{display:grid;grid-template-columns:128px 1fr 28px;gap:8px;align-items:center}
+.lf-funnel b{text-align:right;font-variant-numeric:tabular-nums}
+.lf-find{margin-top:12px}
+.lf-find ul{margin:4px 0 0;padding-left:18px;font-size:.92rem}
+.lf-find li+li{margin-top:4px}
+.lf-find.bad ul{color:var(--danger)} .lf-find.mid ul{color:var(--warn)}
+#lf-msg{min-height:150px;font-size:.95rem;line-height:1.45}

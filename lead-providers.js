@@ -75,7 +75,6 @@ const SEGMENT_FILTERS = {
   servicos: ['["craft"]', '["office"]', '["shop"~"^(laundry|dry_cleaning|locksmith|tailor|copyshop|travel_agency|funeral_directors|pet_grooming)$"]'],
 };
 const reEscape = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/["\n\r]/g, '');
-const sleep = (ms, signal) => new Promise((res, rej) => { const id = setTimeout(res, ms); signal?.addEventListener('abort', () => { clearTimeout(id); rej(new DOMException('Cancelada', 'AbortError')); }, { once: true }); });
 
 async function fetchT(url, init, ms, signal) {
   const c = new AbortController();
@@ -143,26 +142,29 @@ const osm = {
     // Pede mais que o necessário quando há filtro de presença digital, com teto fixo.
     const cap = Math.min(p.presence === 'todas' ? p.limit : p.limit * 4, 600);
     const ql = buildQuery(p, g, cap);
+    const wholeArea = !(p.radius_km > 0) && !p.neighborhood;
     let lastErr = 'A fonte de dados está indisponível agora.';
-    // Até 2 rodadas pelos servidores, com espera entre elas (recomendação do próprio Overpass).
-    for (let round = 0; round < 2; round++) {
-      for (const ep of OVERPASS) {
-        if (signal?.aborted) throw new DOMException('Cancelada', 'AbortError');
-        onStep?.(round ? 'A fonte está ocupada, tentando de novo…' : 'Consultando estabelecimentos…');
-        let r;
-        try { r = await fetchT(ep, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(ql) }, 45000, signal); }
-        catch (e) { if (signal?.aborted) throw e; lastErr = 'A fonte de dados demorou demais para responder.'; continue; }
-        if ([429, 502, 503, 504].includes(r.status)) { lastErr = 'A fonte gratuita está ocupada agora. Tente novamente em 1 ou 2 minutos.'; continue; }
-        if (r.status === 400) throw new Error('A fonte recusou a consulta. Simplifique o termo personalizado.');
-        if (!r.ok) { lastErr = `A fonte de dados respondeu com erro (${r.status}).`; continue; }
-        const data = await r.json().catch(() => null);
-        if (!data || !Array.isArray(data.elements)) { lastErr = 'Resposta inesperada da fonte de dados.'; continue; }
-        if (typeof data.remark === 'string' && /timed out|out of memory/i.test(data.remark) && !data.elements.length) {
-          throw new Error('A área é grande demais para esta busca. Informe um bairro ou escolha um raio.');
-        }
-        return { places: data.elements.map(osmToPlace).filter(Boolean), areaLabel: g.label };
+    // Uma passada pelos servidores públicos, um de cada vez (no pior caso, cerca de 1min45).
+    for (let i = 0; i < OVERPASS.length; i++) {
+      if (signal?.aborted) throw new DOMException('Cancelada', 'AbortError');
+      onStep?.(`Consultando estabelecimentos (servidor ${i + 1} de ${OVERPASS.length})…`);
+      let r;
+      try { r = await fetchT(OVERPASS[i], { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(ql) }, 35000, signal); }
+      catch (e) {
+        if (signal?.aborted) throw e;
+        // Cidade inteira sem bairro nem raio costuma estourar o tempo: não adianta repetir a mesma consulta pesada.
+        if (wholeArea && i === 0) throw new Error('A área é grande demais para a fonte gratuita. Informe um bairro ou escolha um raio (ex.: 2 km).');
+        lastErr = 'A fonte de dados demorou demais para responder. Tente de novo em alguns minutos ou reduza a área.'; continue;
       }
-      if (round === 0) await sleep(6000, signal);
+      if ([429, 502, 503, 504].includes(r.status)) { lastErr = 'A fonte gratuita está ocupada agora. Tente novamente em alguns minutos.'; continue; }
+      if (r.status === 400) throw new Error('A fonte recusou a consulta. Simplifique o termo personalizado.');
+      if (!r.ok) { lastErr = `A fonte de dados respondeu com erro (${r.status}).`; continue; }
+      const data = await r.json().catch(() => null);
+      if (!data || !Array.isArray(data.elements)) { lastErr = 'Resposta inesperada da fonte de dados.'; continue; }
+      if (typeof data.remark === 'string' && /timed out|out of memory/i.test(data.remark) && !data.elements.length) {
+        throw new Error('A área é grande demais para a fonte gratuita. Informe um bairro ou escolha um raio (ex.: 2 km).');
+      }
+      return { places: data.elements.map(osmToPlace).filter(Boolean), areaLabel: g.label };
     }
     throw new Error(lastErr);
   },

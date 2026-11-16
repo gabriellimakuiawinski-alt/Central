@@ -946,7 +946,7 @@ const act = {
   },
 };
 /* Lead Finder: módulo em leads.js, usando os mesmos utilitários da central */
-LF.init({ sb, esc, toast, openModal, closeModal, askModal, confirmModal, guard, friendly, route, fmtTs, fmtDate, brl, nn, safeUrl, waLink });
+LF.init({ sb, esc, toast, openModal, closeModal, askModal, confirmModal, guard, friendly, route, fmtTs, fmtDate, brl, nn, safeUrl, waLink, settings: () => S.settings, userId: () => S.user?.id });
 Object.assign(act, LF.actions);
 async function setStage(p, stage) {
   const patch = { stage };
