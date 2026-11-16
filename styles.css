@@ -238,3 +238,37 @@ a.tile:hover{transform:translateY(-3px)}
   *,*::before,*::after{animation-duration:.01ms!important;animation-delay:0s!important;transition-duration:.01ms!important}
   .reveal{opacity:1;transform:none} .chart .ln{stroke-dashoffset:0} .chart .ar{opacity:1}
 }
+
+/* ===== Lead Finder ===== */
+.nav .nav-long{display:none}
+@media(min-width:900px){.nav .nav-long{display:inline}.nav .nav-short{display:none}}
+.lf-cols{display:grid;gap:14px;grid-template-columns:minmax(0,1fr);align-items:start}
+@media(min-width:1000px){.lf-cols{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.lf-loading{animation:lfpulse 1.2s ease-in-out infinite alternate}
+@keyframes lfpulse{from{opacity:.55}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){.lf-loading{animation:none}}
+.lf-filters{display:grid;gap:0 10px;grid-template-columns:1fr 1fr;align-items:end}
+.lf-filters label:first-child,.lf-filters .row{grid-column:1/-1}
+@media(min-width:900px){.lf-filters{grid-template-columns:2fr repeat(4,1fr)}.lf-filters label:first-child{grid-column:auto}}
+.lf-tablewrap{margin-top:12px}
+.lf-table{width:100%;border-collapse:separate;border-spacing:0 8px;font-size:.92rem}
+.lf-table th{text-align:left;font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:0 12px}
+.lf-table td{padding:12px;background:rgba(255,255,255,.045);border-top:1px solid var(--border);border-bottom:1px solid var(--border);vertical-align:middle;word-break:break-word}
+.lf-table td:first-child{border-left:1px solid var(--border);border-radius:16px 0 0 16px}
+.lf-table td:last-child{border-right:1px solid var(--border);border-radius:0 16px 16px 0;white-space:nowrap}
+.lf-table a.t{color:var(--text);font-weight:600}
+.lf-table tr:hover td{background:rgba(255,255,255,.07)}
+@media(max-width:899px){
+  .lf-table,.lf-table tbody,.lf-table tr,.lf-table td{display:block;width:100%}
+  .lf-table thead{display:none}
+  .lf-table tr{background:rgba(255,255,255,.045);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;margin-bottom:10px}
+  .lf-table td,.lf-table td:first-child,.lf-table td:last-child{background:none;border:0;border-radius:0;padding:3px 0;white-space:normal}
+  .lf-table td[data-l]:not([data-l="Empresa"]){display:grid;grid-template-columns:96px 1fr;gap:8px;font-size:.88rem}
+  .lf-table td[data-l]:not([data-l="Empresa"])::before{content:attr(data-l);color:var(--muted);font-size:.78rem}
+  .lf-table td[data-l="Empresa"]{margin-bottom:6px}
+  .lf-table td.right{text-align:left;margin-top:8px}
+  .lf-table tr:hover td{background:none}
+}
+@media(max-width:899px){
+  .lf-table td[data-l="Origem"],.lf-table td[data-l="Pontos"],.lf-table td[data-l="Atualizado"]{display:none}
+}

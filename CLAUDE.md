@@ -41,3 +41,12 @@ vault_keys, clients, projects, project_services, payments, expenses, project_lin
 1. ~~Restaurar backup dentro do app~~ FEITO (Ajustes > Backup > Restaurar de arquivo; mescla por id via upsert, não apaga, não mexe no cofre). Ainda não testado com login real.
 2. Envio automático do backup para o Google Drive (exige credencial OAuth do Google).
 3. Pix/boleto automático, Gmail, status de deploy do GitHub, cobrança recorrente de manutenção.
+
+## Lead Finder (módulo de prospecção, pessoal — sem relação com a Founders)
+- Arquivos: `leads.js` (telas, CRM), `lead-providers.js` (fontes de dados + normalização). Ligado ao `app.js` por `LF.init/view/actions/forms/onChange`; rota `#/leads` e `#/leads/<id>`.
+- Fonte gratuita: OpenStreetMap (Nominatim + Overpass) chamada **pelo navegador** (servidores de nuvem são recusados pelo Overpass; testado). Hosts liberados na CSP do `index.html`. Fontes com chave (Google Places) devem ir em Edge Function.
+- Banco: tabelas `lf_*` (settings, searches, companies, company_sources, site_analyses, scores, events, tasks, errors, api_usage), mesmo padrão RLS + 2FA. Funções: `lf_begin_search` (limite por hora no servidor), `lf_ingest` (deduplicação: id da fonte, telefone, domínio+nome, nome+proximidade), trigger `lf_log_company_changes` (histórico). Migração em `supabase/migrations/`.
+- Regras: nunca mostrar dado fictício; "sem site" = "não encontrado na fonte"; WhatsApp só por clique, um lead por vez, e desativado em "Não contatar"; manter a atribuição do OpenStreetMap.
+- Etapas: 1 análise e 2 MVP FEITAS (busca, lista, ficha, CRM, deduplicação). Pendentes: 3 (análise de sites em Edge Function com proteção SSRF + PageSpeed, Lead Score, mensagens por modelos gratuitos) e 4 (painel com gráficos, agendamentos com pg_cron/pg_net, relatórios, Google Places opcional).
+- A Edge Function `lf-search` no Supabase é um resto desativado (responde 410); pode ser apagada no painel.
+- Plano gratuito do Supabase só mantém 2 projetos ativos: em 16/11/2026 o Macacadas Map foi pausado para a Central voltar.

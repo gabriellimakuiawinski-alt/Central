@@ -1,5 +1,6 @@
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import * as V from './crypto.js';
+import * as LF from './leads.js';
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
@@ -218,6 +219,7 @@ function lock() {
   if (!S.dk) return;
   S.dk = null;
   Object.assign(S, { clients: [], projects: [], services: [], payments: [], expenses: [], links: [], log: [], settings: null });
+  LF.reset();
   closeModal();
   showLock(false);
 }
@@ -225,6 +227,7 @@ async function logout() {
   try { await sb.auth.signOut(); } catch {}
   await V.disableBiometric();
   Object.assign(S, { user: null, vaultRow: null, dk: null, loginPassword: null, clients: [], projects: [], services: [], payments: [], expenses: [], links: [], log: [], settings: null });
+  LF.reset();
   closeModal();
   showLogin();
 }
@@ -278,13 +281,14 @@ const ICON = {
   clientes: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
   projetos: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   despesas: '<circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5c0-1 1-1.5 2.5-1.5s2.5.6 2.5 1.8c0 2.4-5 1.4-5 3.8 0 1.2 1 1.9 2.5 1.9s2.5-.6 2.5-1.5"/>',
+  leads: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/><path d="M12 12l6.4-6.4"/>',
   ajustes: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
 };
 async function enterApp() {
   await loadAll();
-  const items = [['painel', 'Painel'], ['clientes', 'Clientes'], ['projetos', 'Projetos'], ['despesas', 'Despesas'], ['ajustes', 'Ajustes']];
+  const items = [['painel', 'Painel'], ['clientes', 'Clientes'], ['projetos', 'Projetos'], ['despesas', 'Despesas'], ['leads', 'Lead Finder'], ['ajustes', 'Ajustes']];
   setScreen(`<div class="shell"><nav class="nav" aria-label="Principal"><div class="brand">Central</div>${items
-    .map(([k, n]) => `<a href="#/${k === 'ajustes' ? 'config' : k}" data-nav="${k}"><svg viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg>${n}</a>`).join('')}</nav><main id="view"></main></div>`);
+    .map(([k, n]) => `<a href="#/${k === 'ajustes' ? 'config' : k}" data-nav="${k}"><svg viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg>${k === 'leads' ? '<span class="nav-long">Lead Finder</span><span class="nav-short">Leads</span>' : n}</a>`).join('')}</nav><main id="view"></main></div>`);
   S.booted = true;
   if (!location.hash || location.hash === '#') location.hash = '#/painel';
   route();
@@ -294,7 +298,7 @@ function route() {
   const view = $('#view');
   if (!view || !S.dk) return;
   const [, a, id] = (location.hash || '#/painel').split('/');
-  const map = { painel: 'painel', clientes: 'clientes', projetos: 'projetos', despesas: 'despesas', config: 'ajustes', doc: 'projetos' };
+  const map = { painel: 'painel', clientes: 'clientes', projetos: 'projetos', despesas: 'despesas', config: 'ajustes', doc: 'projetos', leads: 'leads' };
   document.querySelectorAll('[data-nav]').forEach((n) => n.classList.toggle('on', n.dataset.nav === (map[a] || 'painel')));
   if (a === 'projetos' && id && id !== S.lastProj) S.ptab = 'resumo';
   if (a === 'clientes' && id && id !== S.lastCli) S.ctab = 'projetos';
@@ -307,6 +311,7 @@ function route() {
     else if (a === 'despesas') html = vExpenses();
     else if (a === 'config') html = vSettings();
     else if (a === 'doc') html = vDoc(id);
+    else if (a === 'leads') html = LF.view(id);
     else html = vDashboard();
   } catch (e) { console.error(e); html = `<div class="empty">Algo deu errado ao montar esta tela.</div>`; }
   view.innerHTML = html;
@@ -940,6 +945,9 @@ const act = {
     setChartIndex(S.chart.i);
   },
 };
+/* Lead Finder: módulo em leads.js, usando os mesmos utilitários da central */
+LF.init({ sb, esc, toast, openModal, closeModal, askModal, confirmModal, guard, friendly, route, fmtTs, fmtDate, brl, nn, safeUrl, waLink });
+Object.assign(act, LF.actions);
 async function setStage(p, stage) {
   const patch = { stage };
   if (stage === 'publicacao' && !p.published_at) patch.published_at = today();
@@ -955,6 +963,7 @@ document.addEventListener('click', (e) => {
 document.addEventListener('change', (e) => {
   const el = e.target.closest('[data-action-change]');
   if (!el) return;
+  if (LF.onChange(el)) return;
   if (el.dataset.actionChange === 'pfilter') { S.pfilter = el.value; route(); }
   if (el.dataset.actionChange === 'restore-file') { const f = el.files?.[0]; el.value = ''; guard(() => restoreBackup(f)); }
   if (el.dataset.actionChange === 'stage') guard(() => setStage(projectOf(el.dataset.id), el.value));
@@ -1055,6 +1064,7 @@ const forms = {
     S.vaultRow = r.data; closeModal(); toast('Senha trocada');
   },
 };
+Object.assign(forms, LF.forms);
 document.addEventListener('submit', (e) => {
   const f = e.target.closest('form[data-form]');
   if (!f) return;
