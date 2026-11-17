@@ -280,11 +280,11 @@ function barsSVG(buckets) {
     ${buckets.map((b, i) => {
       const x = i * bw, w = Math.max(2, bw * 0.34);
       return `<g><title>${C.esc(b.label)}: ${b.a} encontrados, ${b.b} contatados</title>
-        <rect x="${(x + bw * 0.14).toFixed(1)}" y="${(H - padB - h(b.a)).toFixed(1)}" width="${w.toFixed(1)}" height="${h(b.a).toFixed(1)}" rx="3" fill="#ff2b3d"/>
-        <rect x="${(x + bw * 0.52).toFixed(1)}" y="${(H - padB - h(b.b)).toFixed(1)}" width="${w.toFixed(1)}" height="${h(b.b).toFixed(1)}" rx="3" fill="#e9e4e6"/>
-        ${i % every === 0 ? `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="#9a9299">${C.esc(b.short)}</text>` : ''}</g>`;
+        <rect x="${(x + bw * 0.14).toFixed(1)}" y="${(H - padB - h(b.a)).toFixed(1)}" width="${w.toFixed(1)}" height="${h(b.a).toFixed(1)}" rx="3" style="fill:var(--accent)"/>
+        <rect x="${(x + bw * 0.52).toFixed(1)}" y="${(H - padB - h(b.b)).toFixed(1)}" width="${w.toFixed(1)}" height="${h(b.b).toFixed(1)}" rx="3" style="fill:var(--gold)"/>
+        ${i % every === 0 ? `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="11" style="fill:var(--muted)">${C.esc(b.short)}</text>` : ''}</g>`;
     }).join('')}
-    <text x="4" y="12" font-size="11" fill="#9a9299">máx. ${max}</text></svg>`;
+    <text x="4" y="12" font-size="11" style="fill:var(--muted)">máx. ${max}</text></svg>`;
 }
 function buildBuckets(days) {
   const out = [], now = new Date(); now.setHours(0, 0, 0, 0);

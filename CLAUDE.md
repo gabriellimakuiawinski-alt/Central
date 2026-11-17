@@ -9,8 +9,10 @@ App pessoal (PWA) do Gabriel para organizar o trabalho de criação de sites: cl
 - Hospedagem: GitHub Pages, publicado em https://gabriellimakuiawinski-alt.github.io/central/ (repo gabriellimakuiawinski-alt/central, branch main, pasta raiz). Primeiro cadastro já feito (a vaga única está ocupada).
 
 ## Visual
-- Tema "vidro líquido" preto com luz vermelha (referência: dashboard roxo com cartões de vidro). Fundo `.aurora` animado, cartões com `backdrop-filter`, brilho que segue o cursor (`--mx/--my`).
-- Painel com gráficos em SVG puro e interativos (linha recebido x despesas com tooltip, rosca por etapa, anéis de progresso) e contadores animados. Sem bibliotecas: a CSP só aceita scripts de 'self'.
+- Tema "natureza mística + vidro líquido" (referência: dashboard com nuvens em camadas, lua e ramos dourados). `theme.js` (carregado no `<head>`, antes do CSS) monta a cena de fundo em `.aurora`: céu, lua, estrelas, nuvens e colinas em camadas com linhas de contorno, ramos dourados e vaga-lumes, tudo pintado com variáveis CSS.
+- Estilos (`data-style` no `<html>`): mistico (padrão), floresta, crepusculo, carmesim (o visual antigo preto/vermelho). Modo (`data-mode`): dark/light, escolhido como automático/escuro/claro. Animações do fundo (`data-motion`): full/calm. Tudo salvo em localStorage (`central.style`, `central.mode`, `central.motion`), só no aparelho. Troca em Ajustes > Aparência; o botão de sol/lua do Painel alterna claro/escuro (com transição em círculo via View Transitions).
+- Cores SEMPRE por variável (`--accent`, `--gold`, `--k1..4`, `--c1..7`, `--text`, `--muted`, `--soft`, `--track`...). Nada de hex fixo em app.js/leads.js: em SVG, use `style="fill:var(--x)"` / `style="stop-color:var(--x)"` (atributo `fill` não aceita var()).
+- Painel: saudação por horário, 4 cartões coloridos com minigráfico dos últimos 8 meses e onda líquida animada, inclinação 3D no hover, gráfico de linha com tooltip, rosca por etapa, anéis de progresso, contadores animados. SVG puro, sem bibliotecas (a CSP só aceita scripts de 'self').
 - Respeita `prefers-reduced-motion`.
 
 ## Decisões já tomadas

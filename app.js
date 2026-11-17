@@ -282,12 +282,16 @@ const ICON = {
   projetos: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   despesas: '<circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5c0-1 1-1.5 2.5-1.5s2.5.6 2.5 1.8c0 2.4-5 1.4-5 3.8 0 1.2 1 1.9 2.5 1.9s2.5-.6 2.5-1.5"/>',
   leads: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/><path d="M12 12l6.4-6.4"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/><path d="M17 3l.6 1.4L19 5l-1.4.6L17 7l-.6-1.4L15 5l1.4-.6z"/>',
+  palette: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-.9-.6-1.3-.6-2.1 0-1 .8-1.6 1.8-1.6H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10" cy="7" r="1.2"/><circle cx="15" cy="7.5" r="1.2"/>',
+  check: '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.8 2.8L16.5 9.5"/>',
   ajustes: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
 };
 async function enterApp() {
   await loadAll();
   const items = [['painel', 'Painel'], ['clientes', 'Clientes'], ['projetos', 'Projetos'], ['despesas', 'Despesas'], ['leads', 'Lead Finder'], ['ajustes', 'Ajustes']];
-  setScreen(`<div class="shell"><nav class="nav" aria-label="Principal"><div class="brand">Central</div>${items
+  setScreen(`<div class="shell"><nav class="nav" aria-label="Principal"><div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M20 5a11 11 0 1 0 7 19A9 9 0 0 1 20 5z"/><path d="M9 9l.8 2.2L12 12l-2.2.8L9 15l-.8-2.2L6 12l2.2-.8z"/><path d="M16 27c0-4 2-7 5-9M16 27c0-3-1.5-5-4-6.5"/></svg>Central</div>${items
     .map(([k, n]) => `<a href="#/${k === 'ajustes' ? 'config' : k}" data-nav="${k}"><svg viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg>${k === 'leads' ? '<span class="nav-long">Lead Finder</span><span class="nav-short">Leads</span>' : n}</a>`).join('')}</nav><main id="view"></main></div>`);
   S.booted = true;
   if (!location.hash || location.hash === '#') location.hash = '#/painel';
@@ -377,14 +381,14 @@ function chartInner() {
   const lr = smoothPath(pr, base), le = smoothPath(pe, base);
   const grid = [0, 1, 2, 3].map((i) => { const gy = T + ((base - T) * i) / 3; return `<line class="gl" x1="${L}" x2="${W - R}" y1="${gy}" y2="${gy}"/>`; }).join('');
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Recebido e despesas dos últimos meses">
-    <defs><linearGradient id="gAr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff2b3d" stop-opacity=".5"/><stop offset="1" stop-color="#ff2b3d" stop-opacity="0"/></linearGradient>
-    <linearGradient id="gLn" x1="0" x2="1"><stop offset="0" stop-color="#ff7a86"/><stop offset="1" stop-color="#ff2b3d"/></linearGradient></defs>
+    <defs><linearGradient id="gAr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--accent);stop-opacity:.45"/><stop offset="1" style="stop-color:var(--accent);stop-opacity:0"/></linearGradient>
+    <linearGradient id="gLn" x1="0" x2="1"><stop offset="0" style="stop-color:var(--accent2)"/><stop offset="1" style="stop-color:var(--accent)"/></linearGradient></defs>
     ${grid}
     <rect id="cv-bar" x="0" y="${T - 6}" width="${step * 0.8}" height="${base - T + 6}" rx="${step * 0.4}"/>
     ${on.r ? `<path class="ar" d="${lr}L${xs[n - 1]},${base}L${xs[0]},${base}Z" fill="url(#gAr)"/><path class="ln r" pathLength="1" d="${lr}"/>` : ''}
     ${on.e ? `<path class="ln e" pathLength="1" d="${le}"/>` : ''}
     ${ms.map((m, i) => `<text class="ax" x="${xs[i]}" y="${H - 8}">${esc(m.n)}</text>`).join('')}
-    <g class="sc" id="cv-sc"><line id="cv-line" y1="${T - 6}" y2="${base}" stroke="rgba(255,255,255,.18)" stroke-dasharray="3 4"/>
+    <g class="sc" id="cv-sc"><line id="cv-line" y1="${T - 6}" y2="${base}" stroke-dasharray="3 4"/>
     ${on.r ? '<circle class="dot r" id="cv-dr" r="6"/>' : ''}${on.e ? '<circle class="dot e" id="cv-de" r="5"/>' : ''}</g>
     <rect class="hit" x="0" y="0" width="${W}" height="${H}"/></svg>
     <div class="tip" id="cv-tip"></div>`;
@@ -406,7 +410,7 @@ function setChartIndex(i) {
   const top = Math.min(...['r', 'e'].filter((k) => S.series[k]).map((k) => c.ys[k][i]));
   tip.style.top = Math.max(0, (top / CH.H) * svg.clientHeight - tip.offsetHeight - 6) + 'px';
 }
-const DONUT_COLORS = ['#ff2b3d', '#ff5a6b', '#ff8a8f', '#ffa86a', '#ffd08a', '#f4f1f1', '#9a9299'];
+const DONUT_COLORS = [1, 2, 3, 4, 5, 6, 7].map((n) => `var(--c${n})`);
 function donutHTML(active) {
   const counts = STAGES.map(([k, n], i) => ({ k, n, c: active.filter((p) => p.stage === k).length, col: DONUT_COLORS[i % DONUT_COLORS.length], i }));
   const total = counts.reduce((a, x) => a + x.c, 0), C = 2 * Math.PI * 58, gap = total > 1 ? 5 : 0;
@@ -432,9 +436,28 @@ function miniProjects(active) {
       const d = Math.round((new Date(p.due_date + 'T12:00:00') - new Date(t + 'T12:00:00')) / 864e5);
       badge = d < 0 ? `<span class="badge bad">${-d} dia${d === -1 ? '' : 's'} atrasado</span>` : `<span class="badge ${d <= 7 ? 'mid' : 'ok'}">${d === 0 ? 'Vence hoje' : d + ' dia' + (d === 1 ? '' : 's')}</span>`;
     }
-    return `<a class="card pc reveal" style="--i:${i + 4}" href="#/projetos/${p.id}"><div class="ring"><svg viewBox="0 0 78 78"><defs><linearGradient id="gRing${i}" x1="0" x2="1"><stop offset="0" stop-color="#ff7a86"/><stop offset="1" stop-color="#ff2b3d"/></linearGradient></defs><circle class="t" cx="39" cy="39" r="32"/><circle class="p" cx="39" cy="39" r="32" stroke="url(#gRing${i})" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - pct / 100)).toFixed(1)}" style="--c:${C.toFixed(1)}"/></svg><b>${pct}%</b></div>
+    return `<a class="card pc reveal" style="--i:${i + 4}" href="#/projetos/${p.id}"><div class="ring"><svg viewBox="0 0 78 78"><defs><linearGradient id="gRing${i}" x1="0" x2="1"><stop offset="0" style="stop-color:var(--accent2)"/><stop offset="1" style="stop-color:var(--accent)"/></linearGradient></defs><circle class="t" cx="39" cy="39" r="32"/><circle class="p" cx="39" cy="39" r="32" stroke="url(#gRing${i})" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - pct / 100)).toFixed(1)}" style="--c:${C.toFixed(1)}"/></svg><b>${pct}%</b></div>
       <div class="nm">${esc(p.name)}</div><div class="cl">${esc(cl?.name || '')} · ${esc(STAGES.find(([k]) => k === p.stage)?.[1] || '')}</div>${badge}</a>`;
   }).join('');
+}
+/* cartões coloridos com minigráfico (últimos 8 meses) e onda líquida animada */
+function sparkSVG(s, id) {
+  const W = 200, H = 54, max = Math.max(1, ...s);
+  const pts = s.map((v, i) => [(i * W) / (s.length - 1), H - 8 - (H - 22) * (v / max)]);
+  const ln = smoothPath(pts, H);
+  const wave = (y, a) => `M0,${y}` + [1, 2, 3, 4, 5, 6, 7, 8].map((k) => `Q${k * 50 - 25},${y + (k % 2 ? -a : a)} ${k * 50},${y}`).join('') + `L400,${H}L0,${H}Z`;
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+    <defs><linearGradient id="sk${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--kc);stop-opacity:.55"/><stop offset="1" style="stop-color:var(--kc);stop-opacity:0"/></linearGradient></defs>
+    <g class="flow"><path d="${wave(44, 5)}"/></g><g class="flow b"><path d="${wave(48, 4)}"/></g>
+    <path class="sa" d="${ln}L${W},${H}L0,${H}Z" fill="url(#sk${id})"/><path class="sl" pathLength="1" vector-effect="non-scaling-stroke" d="${ln}"/></svg>`;
+}
+function kpi(i, kc, icon, label, value, series, invert = false) {
+  const cur = series.at(-1), prev = series.at(-2);
+  let d = '<span class="d">sem movimento</span>';
+  if (prev) { const pc = Math.round(((cur - prev) / prev) * 100), good = invert ? pc <= 0 : pc >= 0; d = `<span class="d ${good ? 'up' : 'dn'}">${pc >= 0 ? '↑' : '↓'} ${Math.abs(pc)}%</span>`; }
+  else if (cur) d = '<span class="d up">novo</span>';
+  return `<div class="kpi reveal" style="--i:${i};--kc:var(--${kc})"><div class="kh"><span class="ki"><svg viewBox="0 0 24 24">${icon}</svg></span><span class="k">${label}</span></div>
+    <div class="v">${value}</div><div class="dd">${d}<span>mês atual x anterior</span></div>${sparkSVG(series, i)}</div>`;
 }
 function vDashboard() {
   const start = periodStart(S.period);
@@ -458,10 +481,25 @@ function vDashboard() {
   const active = S.projects.filter((p) => !isDone(p));
   const al = buildAlerts();
   const per = [['semana', 'Semana'], ['mes', 'Mês'], ['ano', 'Ano'], ['total', 'Total']];
+  const last = months.slice(-8);
+  const perMonth = (arr, fn) => last.map((m) => arr.filter((x) => String(fn(x) || '').slice(0, 7) === m.k).length);
   const cnt = (v, kind = 'brl') => `<span data-count="${v}" data-kind="${kind}">${kind === 'brl' ? brl(v) : v}</span>`;
-  return `<div class="page-h reveal"><div><div class="eyebrow">Visão geral</div><h1>Painel</h1></div>
-  <div class="tabs">${per.map(([k, n]) => `<button class="tab ${S.period === k ? 'on' : ''}" data-action="period" data-p="${k}">${n}</button>`).join('')}</div></div>
+  const hr = new Date().getHours(), night = hr < 6 || hr >= 18;
+  const greet = hr < 5 ? 'Boa noite' : hr < 12 ? 'Bom dia' : hr < 18 ? 'Boa tarde' : 'Boa noite';
+  const nm = String(S.settings?.business_name || '').trim().split(/\s+/)[0];
+  const light = window.CentralTheme?.get().resolved === 'light';
+  return `<div class="page-h reveal"><div class="greet"><span class="gi ${night ? 'moon' : 'sun'}"><svg viewBox="0 0 24 24">${night ? ICON.moon : ICON.sun}</svg></span>
+    <div><div class="eyebrow">Painel</div><h1>${greet}${nm ? ', ' + esc(nm) : ''}</h1><div class="muted small">Veja como andam seus projetos hoje.</div></div></div>
+  <div class="row"><div class="tabs">${per.map(([k, n]) => `<button class="tab ${S.period === k ? 'on' : ''}" data-action="period" data-p="${k}">${n}</button>`).join('')}</div>
+    <button class="iconbtn" data-action="toggle-mode" aria-label="${light ? 'Usar tema escuro' : 'Usar tema claro'}" title="${light ? 'Tema escuro' : 'Tema claro'}"><svg viewBox="0 0 24 24">${light ? ICON.moon : ICON.sun}</svg></button>
+    <a class="iconbtn" href="#/config" aria-label="Aparência" title="Aparência"><svg viewBox="0 0 24 24">${ICON.palette}</svg></a></div></div>
   <div class="dash">
+    <div class="kpis">
+      ${kpi(1, 'k1', ICON.despesas, 'Despesas', cnt(exp), last.map((m) => m.e), true)}
+      ${kpi(2, 'k2', ICON.projetos, 'Projetos novos', cnt(newProj, 'int'), perMonth(S.projects, (p) => ymd(new Date(p.created_at))))}
+      ${kpi(3, 'k3', ICON.check, 'Entregues', cnt(delivered, 'int'), perMonth(S.projects, (p) => p.published_at))}
+      ${kpi(4, 'k4', ICON.clientes, 'Clientes novos', cnt(newCli, 'int'), perMonth(S.clients, (c) => ymd(new Date(c.created_at))))}
+    </div>
     <section class="card hero reveal" style="--i:1"><div class="hero-h"><h2>Recebido x despesas</h2>
       <div class="row" style="gap:6px"><button class="sbtn ${S.series.r ? '' : 'off'}" data-action="series" data-s="r"><i></i>Recebido</button><button class="sbtn e ${S.series.e ? '' : 'off'}" data-action="series" data-s="e"><i></i>Despesas</button></div></div>
       <div class="chart" id="chart">${chartInner()}</div>
@@ -474,12 +512,6 @@ function vDashboard() {
         <div class="tile reveal" style="--i:3"><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3 2.5 20h19z"/><path d="M12 10v4M12 17.5h0"/></svg></div><div><div class="n ${al.length ? 'neg' : ''}">${cnt(al.length, 'int')}</div><div class="l">Alertas pendentes</div></div></div>
       </div>
       <section class="card donut-card reveal" style="--i:4"><h2>Projetos por etapa</h2>${donutHTML(active)}</section>
-    </div>
-    <div class="grid g4 stats">
-      <div class="stat reveal" style="--i:3"><div class="k">Despesas</div><div class="v">${cnt(exp)}</div></div>
-      <div class="stat reveal" style="--i:4"><div class="k">Projetos novos</div><div class="v">${cnt(newProj, 'int')}</div></div>
-      <div class="stat reveal" style="--i:5"><div class="k">Entregues</div><div class="v">${cnt(delivered, 'int')}</div></div>
-      <div class="stat reveal" style="--i:6"><div class="k">Clientes novos</div><div class="v">${cnt(newCli, 'int')}</div></div>
     </div>
     <div class="mini">${miniProjects(active)}</div>
     <section class="alerts reveal" style="--i:5"><div class="section" style="margin-top:4px"><h2>Alertas</h2></div>
@@ -505,7 +537,11 @@ document.addEventListener('pointermove', (e) => {
   const t = e.target;
   if (!t.closest) return;
   const g = t.closest('.card,.stat,.tile,.btn,.panel');
-  if (g) { const r = g.getBoundingClientRect(); g.style.setProperty('--mx', e.clientX - r.left + 'px'); g.style.setProperty('--my', e.clientY - r.top + 'px'); }
+  if (g) {
+    const r = g.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    g.style.setProperty('--mx', x + 'px'); g.style.setProperty('--my', y + 'px');
+    if (g.matches('.kpi,.tile')) { g.style.setProperty('--tx', ((x / r.width - 0.5) * 10).toFixed(2) + 'deg'); g.style.setProperty('--ty', ((0.5 - y / r.height) * 10).toFixed(2) + 'deg'); }
+  }
   if (t.closest('#chart') && S.chart?.xs) { const r = $('#chart svg').getBoundingClientRect(); setChartIndex(Math.round((((e.clientX - r.left) / r.width) * CH.W - CH.L) / S.chart.step)); }
   const nEl = $('#dn-n'), lEl = $('#dn-l');
   if (!nEl) return;
@@ -771,10 +807,35 @@ function vDoc(id) {
 }
 
 /* ============ ajustes ============ */
+function vAppearance() {
+  const T = window.CentralTheme;
+  if (!T) return '';
+  const t = T.get();
+  const seg = (list, cur, action) => `<div class="tabs">${list.map(([k, n]) => `<button class="tab ${cur === k ? 'on' : ''}" data-action="${action}" data-v="${k}">${n}</button>`).join('')}</div>`;
+  return `<div class="section"><h2>Aparência</h2></div>
+  <div class="card stack">
+    <div><div class="t" style="font-weight:600">Estilo</div><div class="muted small">Muda as cores, o fundo e os gráficos. Fica salvo só neste aparelho.</div>
+      <div class="sty-grid">${T.STYLES.map(([k, n, ds]) => `<button class="sty ${t.style === k ? 'on' : ''}" data-action="set-style" data-v="${k}" aria-pressed="${t.style === k}">
+        <div class="pv" data-style="${k}" data-mode="${t.resolved}"><i class="m"></i><i class="h a"></i><i class="h b"></i><i class="h c"></i><i class="dot"></i></div>
+        <div class="nm">${n}</div><div class="ds">${ds}</div></button>`).join('')}</div></div>
+    <div class="ap-row"><div><div class="t" style="font-weight:600">Tema</div><div class="muted small">Automático segue o aparelho.</div></div>${seg(T.MODES, t.mode, 'set-mode')}</div>
+    <div class="ap-row"><div><div class="t" style="font-weight:600">Animações do fundo</div><div class="muted small">“Calmas” deixa o fundo parado e gasta menos bateria.</div></div>${seg(T.MOTIONS, t.motion, 'set-motion')}</div>
+  </div>`;
+}
+function setTheme(k, v, el, ev) {
+  const T = window.CentralTheme;
+  if (!T) return;
+  const r = el.getBoundingClientRect();
+  T.set(k, v, { x: ev?.clientX || r.left + r.width / 2, y: ev?.clientY || r.top + r.height / 2 });
+  const y = scrollY;
+  route();
+  scrollTo(0, y);
+}
 function vSettings() {
   const st = S.settings || {};
   const bio = V.deviceInfo();
   return `<div class="page-h"><h1>Ajustes</h1></div>
+  ${vAppearance()}
   <div class="section"><h2>Dados para orçamento e contrato</h2></div>
   <form class="card stack" data-form="settings">
     <label>Seu nome / marca<input name="business_name" value="${esc(st.business_name || '')}"></label>
@@ -841,6 +902,10 @@ async function restoreBackup(file) {
 
 /* ============ ações (cliques) ============ */
 const act = {
+  'set-style': (el, ev) => setTheme('style', el.dataset.v, el, ev),
+  'set-mode': (el, ev) => setTheme('mode', el.dataset.v, el, ev),
+  'set-motion': (el, ev) => setTheme('motion', el.dataset.v, el, ev),
+  'toggle-mode': (el, ev) => setTheme('mode', window.CentralTheme?.get().resolved === 'light' ? 'escuro' : 'claro', el, ev),
   'show-signup': showSignup,
   'show-login': () => showLogin(),
   'show-recover': () => showRecover(''),
