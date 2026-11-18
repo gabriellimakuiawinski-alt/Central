@@ -1,5 +1,5 @@
 // Cache só do "esqueleto" do app (arquivos estáticos). Dados do Supabase nunca passam por aqui.
-const CACHE = 'central-v6';
+const CACHE = 'central-v7';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'leads.js', 'lead-providers.js', 'lead-score.js', 'lead-messages.js', 'crypto.js', 'config.js', 'theme.js', 'vendor/supabase.js', 'manifest.webmanifest', 'icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {

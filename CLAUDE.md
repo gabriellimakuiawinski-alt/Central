@@ -9,10 +9,12 @@ App pessoal (PWA) do Gabriel para organizar o trabalho de criação de sites: cl
 - Hospedagem: GitHub Pages, publicado em https://gabriellimakuiawinski-alt.github.io/central/ (repo gabriellimakuiawinski-alt/central, branch main, pasta raiz). Primeiro cadastro já feito (a vaga única está ocupada).
 
 ## Visual
-- Tema "natureza mística + vidro líquido" (referência: dashboard com nuvens em camadas, lua e ramos dourados). `theme.js` (carregado no `<head>`, antes do CSS) monta a cena de fundo em `.aurora`: céu, lua, estrelas, nuvens e colinas em camadas com linhas de contorno, ramos dourados e vaga-lumes, tudo pintado com variáveis CSS.
-- Estilos (`data-style` no `<html>`): mistico (padrão), floresta, crepusculo, carmesim (o visual antigo preto/vermelho). Modo (`data-mode`): dark/light, escolhido como automático/escuro/claro. Animações do fundo (`data-motion`): full/calm. Tudo salvo em localStorage (`central.style`, `central.mode`, `central.motion`), só no aparelho. Troca em Ajustes > Aparência; o botão de sol/lua do Painel alterna claro/escuro (com transição em círculo via View Transitions).
-- Cores SEMPRE por variável (`--accent`, `--gold`, `--k1..4`, `--c1..7`, `--text`, `--muted`, `--soft`, `--track`...). Nada de hex fixo em app.js/leads.js: em SVG, use `style="fill:var(--x)"` / `style="stop-color:var(--x)"` (atributo `fill` não aceita var()).
-- Painel: saudação por horário, 4 cartões coloridos com minigráfico dos últimos 8 meses e onda líquida animada, inclinação 3D no hover, gráfico de linha com tooltip, rosca por etapa, anéis de progresso, contadores animados. SVG puro, sem bibliotecas (a CSP só aceita scripts de 'self').
+- Vidro fosco sobre um fundo liso com 3 manchas desfocadas das cores da paleta (montadas por `theme.js` em `.aurora`). Sem desenhos/ilustrações no fundo, sem brilhos neon (o usuário achou que tinha "cara de IA").
+- `theme.js` (carregado no `<head>`, antes do CSS) aplica no `<html>`: `data-style` = paleta (12: mistico "Petróleo e ouro" padrão, oceano, floresta, terracota, cafe, bauhaus "Mostarda e anil", crepusculo, lavanda, rosa, menta, grafite, carmesim), `data-mode` dark/light (escolhido como automático/escuro/claro), `data-font` (editorial = Fraunces + Instrument Sans, padrão; grotesca = Bricolage Grotesque; tecnica = IBM Plex Sans + Mono), `data-motion` full/calm. Salvo em localStorage (`central.style/mode/font/motion`), só no aparelho. Troca em Ajustes > Aparência; o botão sol/lua do Painel alterna claro/escuro.
+- Paletas: o CSS de cada uma (claro e escuro) é gerado a partir de 5 cores com contraste conferido (texto/destaque >= 4.5:1). Para criar outra, siga o mesmo formato de variáveis em `styles.css` e adicione em `STYLES` no `theme.js`.
+- Fontes hospedadas em `fonts/` (woff2, subconjunto latino, licença OFL); a CSP não permite fontes externas.
+- Cores SEMPRE por variável (`--accent`, `--gold`, `--k1..4`, `--c1..7`, `--text`, `--muted`, `--soft`, `--track`...). Nada de hex fixo em app.js/leads.js: em SVG, use `style="fill:var(--x)"` / `style="stop-color:var(--x)"`.
+- Painel: data + saudação, 4 cartões coloridos com minigráfico dos últimos 8 meses, gráfico de linha com tooltip, rosca por etapa, anéis de progresso, contadores e entrada animados. SVG puro, sem bibliotecas.
 - Respeita `prefers-reduced-motion`.
 
 ## Decisões já tomadas
