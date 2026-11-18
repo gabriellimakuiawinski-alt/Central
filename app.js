@@ -1,6 +1,7 @@
 import { SUPABASE_URL, SUPABASE_KEY } from './config.js';
 import * as V from './crypto.js';
 import * as LF from './leads.js';
+import * as X from './extras.js';
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
@@ -40,17 +41,21 @@ const STAGES = [
 ];
 const STAGE_NAME = Object.fromEntries(STAGES);
 const SERVICE_KINDS = { dominio: 'Domínio', hospedagem: 'Hospedagem', github: 'GitHub', banco: 'Banco de dados', email: 'E-mail', demo: 'Demo', site_no_ar: 'Site no ar', outro: 'Outro' };
-const PAY_KINDS = { entrada: 'Entrada', saldo: 'Saldo', extra: 'Extra' };
+const PAY_KINDS = { entrada: 'Entrada', saldo: 'Saldo', extra: 'Extra', mensalidade: 'Mensalidade' };
 
 /* ============ estado ============ */
 const S = {
   user: null, vaultRow: null, dk: null, loginPassword: null, lastAuthAt: 0,
   clients: [], projects: [], services: [], payments: [], expenses: [], links: [], log: [], settings: null,
+  timeEntries: [], reminders: [], checks: [], leadsLite: [], remDone: false,
   period: 'mes', ptab: 'resumo', ctab: 'projetos', doctype: 'orcamento', pfilter: '', booted: false,
 };
 const clientOf = (id) => S.clients.find((c) => c.id === id);
 const projectOf = (id) => S.projects.find((p) => p.id === id);
-const paidOf = (pid) => sum(S.payments.filter((p) => p.project_id === pid && p.paid_at), (p) => p.amount);
+// Mensalidades não entram no saldo do projeto (o valor do site); entram no faturamento.
+const paidOf = (pid) => sum(S.payments.filter((p) => p.project_id === pid && p.paid_at && p.kind !== 'mensalidade'), (p) => p.amount);
+const monthlyActive = (p, t = today()) => Number(p.monthly_fee) > 0 && p.monthly_start && p.monthly_start.slice(0, 7) <= t.slice(0, 7) && (!p.monthly_end || p.monthly_end.slice(0, 7) >= t.slice(0, 7));
+const leadName = (id) => S.leadsLite.find((l) => l.id === id)?.name || 'lead';
 const balanceOf = (pr) => Math.max(0, Number(pr.price) - paidOf(pr.id));
 const isDone = (pr) => pr.stage === 'publicacao' && balanceOf(pr) <= 0;
 
@@ -256,10 +261,36 @@ async function loadAll() {
   const res = await Promise.all([
     q('clients'), q('projects'), q('project_services'), q('payments'), q('expenses', 'spent_at'), q('project_links'),
     q('activity_log').limit(500), sb.from('app_settings').select('*').maybeSingle(),
+    q('time_entries', 'worked_on'), sb.from('reminders').select('*').order('due_on', { ascending: true }), q('site_checks', 'checked_at').limit(300),
+    sb.from('lf_companies').select('id,name,next_action,next_action_at,status').limit(2000),
   ]);
   for (const r of res) if (r.error) throw r.error;
   [S.clients, S.projects, S.services, S.payments, S.expenses, S.links, S.log] = res.slice(0, 7).map((r) => r.data || []);
   S.settings = res[7].data;
+  [S.timeEntries, S.reminders, S.checks, S.leadsLite] = res.slice(8, 12).map((r) => r.data || []);
+  await ensureMonthly();
+}
+// Cria as mensalidades que faltam (uma por projeto e mês, do início até o mês atual). Idempotente no banco.
+async function ensureMonthly() {
+  const cur = today().slice(0, 7), rows = [];
+  for (const p of S.projects) {
+    if (!(Number(p.monthly_fee) > 0) || !p.monthly_start) continue;
+    let [y, m] = p.monthly_start.slice(0, 7).split('-').map(Number);
+    const end = p.monthly_end ? p.monthly_end.slice(0, 7) : null;
+    for (let i = 0; i < 120; i++) {
+      const k = `${y}-${String(m).padStart(2, '0')}`;
+      if (k > cur || (end && k > end)) break;
+      const ref = k + '-01';
+      if (!S.payments.some((x) => x.project_id === p.id && x.kind === 'mensalidade' && x.ref_month === ref))
+        rows.push({ project_id: p.id, kind: 'mensalidade', amount: Number(p.monthly_fee), ref_month: ref, due_date: `${k}-${String(p.monthly_day || 10).padStart(2, '0')}` });
+      if (++m > 12) { m = 1; y++; }
+    }
+  }
+  if (!rows.length) return;
+  const r = await sb.from('payments').upsert(rows, { onConflict: 'project_id,kind,ref_month', ignoreDuplicates: true });
+  if (r.error) { console.warn('mensalidades', r.error); return; }
+  const p = await sb.from('payments').select('*').order('created_at', { ascending: false });
+  if (!p.error) S.payments = p.data || [];
 }
 async function save(table, id, obj) {
   const r = id ? await sb.from(table).update(obj).eq('id', id).select().single() : await sb.from(table).insert(obj).select().single();
@@ -292,17 +323,56 @@ async function enterApp() {
   await loadAll();
   const items = [['painel', 'Painel'], ['clientes', 'Clientes'], ['projetos', 'Projetos'], ['despesas', 'Despesas'], ['leads', 'Lead Finder'], ['ajustes', 'Ajustes']];
   setScreen(`<div class="shell"><nav class="nav" aria-label="Principal"><div class="brand">Central</div>${items
-    .map(([k, n]) => `<a href="#/${k === 'ajustes' ? 'config' : k}" data-nav="${k}"><svg viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg>${k === 'leads' ? '<span class="nav-long">Lead Finder</span><span class="nav-short">Leads</span>' : n}</a>`).join('')}</nav><main id="view"></main></div>`);
+    .map(([k, n]) => `<a href="#/${k === 'ajustes' ? 'config' : k}" data-nav="${k}"><svg viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg>${k === 'leads' ? '<span class="nav-long">Lead Finder</span><span class="nav-short">Leads</span>' : n}</a>`).join('')}</nav><main id="view"></main><div id="timer" class="timer" hidden></div></div>`);
   S.booted = true;
   if (!location.hash || location.hash === '#') location.hash = '#/painel';
   route();
   bump();
+  renderTimer();
+  autoTasks();
 }
+/* tarefas automáticas ao abrir: backup diário no Drive e verificação diária dos sites */
+async function autoTasks() {
+  const err = sessionStorage.getItem('central.drive.error');
+  if (err) { sessionStorage.removeItem('central.drive.error'); X.driveClearPending(); toast('Google Drive não conectou: ' + err, true); }
+  try { if (S.settings?.drive_client_id && X.driveToken() && (X.drivePending() || driveDue())) await driveBackup(false); }
+  catch (e) { toast(friendly(e), true); }
+  try {
+    const last = S.checks[0]?.checked_at;
+    if (S.projects.some((p) => p.live_url) && (!last || Date.now() - new Date(last).getTime() > 20 * 3600e3)) await checkSites();
+  } catch (e) { console.warn('verificação de sites', e); }
+}
+const driveDue = () => !!S.settings?.drive_client_id && (!S.settings.drive_last_backup || Date.now() - new Date(S.settings.drive_last_backup).getTime() > 22 * 3600e3);
+function rerenderKeepScroll() { const y = scrollY; route(); scrollTo(0, y); }
+async function checkSites(ids) {
+  const { data, error } = await sb.functions.invoke('site-check', { body: { project_ids: ids || [] } });
+  if (error) { let m = error.message; try { m = (await error.context.json()).error || m; } catch { /* sem corpo */ } throw new Error(m); }
+  S.checks = [...(data?.results || []), ...S.checks];
+  if (S.booted) rerenderKeepScroll();
+  return data?.results || [];
+}
+function latestChecks() {
+  const m = new Map();
+  for (const c of S.checks) if (!m.has(c.project_id)) m.set(c.project_id, c);
+  for (const pid of [...m.keys()]) if (!projectOf(pid)?.live_url) m.delete(pid);
+  return m;
+}
+/* cronômetro de horas: um por vez, guardado neste aparelho */
+function renderTimer() {
+  const el = $('#timer');
+  if (!el) return;
+  const t = X.timerGet();
+  if (!t) { el.hidden = true; el.innerHTML = ''; return; }
+  const p = projectOf(t.pid);
+  el.hidden = false;
+  el.innerHTML = `<i></i><a href="#/projetos/${esc(t.pid)}">${esc(p?.name || 'Projeto')}</a><b class="num" id="timer-clock">${X.fmtClock(Date.now() - t.start)}</b><button class="btn sm" data-action="timer-stop">Parar</button>`;
+}
+setInterval(() => { const t = X.timerGet(), c = $('#timer-clock'); if (t && c) c.textContent = X.fmtClock(Date.now() - t.start); }, 1000);
 function route() {
   const view = $('#view');
   if (!view || !S.dk) return;
   const [, a, id] = (location.hash || '#/painel').split('/');
-  const map = { painel: 'painel', clientes: 'clientes', projetos: 'projetos', despesas: 'despesas', config: 'ajustes', doc: 'projetos', leads: 'leads' };
+  const map = { painel: 'painel', clientes: 'clientes', projetos: 'projetos', despesas: 'despesas', config: 'ajustes', doc: 'projetos', leads: 'leads', lembretes: 'painel' };
   document.querySelectorAll('[data-nav]').forEach((n) => n.classList.toggle('on', n.dataset.nav === (map[a] || 'painel')));
   if (a === 'projetos' && id && id !== S.lastProj) S.ptab = 'resumo';
   if (a === 'clientes' && id && id !== S.lastCli) S.ctab = 'projetos';
@@ -316,6 +386,7 @@ function route() {
     else if (a === 'config') html = vSettings();
     else if (a === 'doc') html = vDoc(id);
     else if (a === 'leads') html = LF.view(id);
+    else if (a === 'lembretes') html = vReminders();
     else html = vDashboard();
   } catch (e) { console.error(e); html = `<div class="empty">Algo deu errado ao montar esta tela.</div>`; }
   view.innerHTML = html;
@@ -353,6 +424,11 @@ function buildAlerts() {
     if (s.expires_at < t) out.push({ lvl: 'bad', href: `#/projetos/${s.project_id}`, txt: `Vencido: ${s.label || SERVICE_KINDS[s.kind]} (${fmtDate(s.expires_at)}) — ${label(s.project_id)}` });
     else if (s.expires_at <= in30) out.push({ lvl: 'warn', href: `#/projetos/${s.project_id}`, txt: `Vence em breve: ${s.label || SERVICE_KINDS[s.kind]} (${fmtDate(s.expires_at)}) — ${label(s.project_id)}` });
   }
+  for (const [pid, c] of latestChecks()) {
+    if (!c.ok) out.push({ lvl: 'bad', href: `#/projetos/${pid}`, txt: `Site com problema: ${label(pid)} — ${c.error || 'sem resposta'}` });
+    if (c.domain_expires && c.domain_expires <= in30) out.push({ lvl: c.domain_expires < t ? 'bad' : 'warn', href: `#/projetos/${pid}`, txt: `Domínio vence ${fmtDate(c.domain_expires)} — ${label(pid)}` });
+  }
+  if (driveDue()) out.push({ lvl: 'warn', href: '#/config', txt: 'Backup do dia no Google Drive ainda não foi enviado. Abra Ajustes > Backup.' });
   return out;
 }
 /* ---- gráficos interativos (SVG puro, sem bibliotecas) ---- */
@@ -440,6 +516,65 @@ function miniProjects(active) {
       <div class="nm">${esc(p.name)}</div><div class="cl">${esc(cl?.name || '')} · ${esc(STAGES.find(([k]) => k === p.stage)?.[1] || '')}</div>${badge}</a>`;
   }).join('');
 }
+/* ---- lembretes ---- */
+const CLOSED_LEAD = ['venda_concluida', 'perdido', 'nao_contatar'];
+function remWho(r) {
+  if (r.project_id) { const p = projectOf(r.project_id); return p ? `<a href="#/projetos/${p.id}">${esc(p.name)}</a>` : ''; }
+  if (r.client_id) { const c = clientOf(r.client_id); return c ? `<a href="#/clientes/${c.id}">${esc(c.name)}</a>` : ''; }
+  if (r.company_id) return `<a href="#/leads/${r.company_id}">${esc(leadName(r.company_id))}</a>`;
+  return '';
+}
+function dueBadge(d) {
+  const t = today();
+  if (d < t) return `<span class="badge bad">atrasado · ${fmtDate(d)}</span>`;
+  if (d === t) return '<span class="badge mid">hoje</span>';
+  const n = Math.round((new Date(d + 'T12:00:00') - new Date(t + 'T12:00:00')) / 864e5);
+  return `<span class="badge">${n === 1 ? 'amanhã' : fmtDate(d)}</span>`;
+}
+function reminderCard(r) {
+  const who = remWho(r);
+  return `<div class="card rem-item ${r.done_at ? 'done' : ''}"><button class="tick" data-action="rem-done" data-id="${r.id}" aria-label="${r.done_at ? 'Reabrir' : 'Marcar como feito'}">${r.done_at ? '✓' : ''}</button>
+    <div class="rem-b"><div class="t">${esc(r.title)}</div><div class="small muted">${r.done_at ? 'feito em ' + fmtDate(r.done_at) : dueBadge(r.due_on)}${who ? ' · ' + who : ''}</div></div>
+    <button class="btn sm" data-action="rem-edit" data-id="${r.id}">Editar</button></div>`;
+}
+function leadDueCard(l) {
+  return `<a class="card rem-item" href="#/leads/${l.id}"><span class="tick lead" aria-hidden="true">L</span><div class="rem-b"><div class="t">${esc(l.next_action || 'Retomar contato')}</div><div class="small muted">${dueBadge(l.next_action_at)} · lead ${esc(l.name)}</div></div></a>`;
+}
+const pendingReminders = () => S.reminders.filter((r) => !r.done_at).sort((a, b) => a.due_on.localeCompare(b.due_on));
+const leadsWithAction = () => S.leadsLite.filter((l) => l.next_action_at && !CLOSED_LEAD.includes(l.status)).sort((a, b) => a.next_action_at.localeCompare(b.next_action_at));
+function vReminders() {
+  const pend = pendingReminders(), leads = leadsWithAction(), done = S.reminders.filter((r) => r.done_at).sort((a, b) => b.done_at.localeCompare(a.done_at)).slice(0, 30);
+  return `<div class="page-h"><div><a class="small" href="#/painel">← Painel</a><h1>Lembretes</h1></div><button class="btn primary" data-action="new-reminder">+ Lembrete</button></div>
+  <div class="stack">${pend.map(reminderCard).join('') || '<div class="empty">Nenhum lembrete pendente.</div>'}</div>
+  <div class="section"><h2>Próximas ações dos leads</h2><a class="small" href="#/leads">Lead Finder</a></div>
+  <div class="stack">${leads.map(leadDueCard).join('') || '<div class="empty">Nenhum lead com próxima ação marcada. Use “Próxima ação / lembrete” na ficha do lead.</div>'}</div>
+  <div class="section"><h2>Feitos</h2><button class="link" data-action="rem-toggle-done">${S.remDone ? 'esconder' : 'mostrar'}</button></div>
+  ${S.remDone ? `<div class="stack">${done.map(reminderCard).join('') || '<div class="empty">Nada por aqui.</div>'}</div>` : ''}`;
+}
+function formReminder(r = {}, link = {}) {
+  const v = (k) => esc(r[k] || link[k] || '');
+  const plus = (n) => ymd(new Date(Date.now() + n * 864e5));
+  const who = r.project_id || link.project_id ? `Projeto: ${esc(projectOf(r.project_id || link.project_id)?.name || '')}` : r.client_id || link.client_id ? `Cliente: ${esc(clientOf(r.client_id || link.client_id)?.name || '')}` : r.company_id || link.company_id ? `Lead: ${esc(leadName(r.company_id || link.company_id))}` : '';
+  return `<form data-form="reminder" class="stack"><input type="hidden" name="id" value="${v('id')}"><input type="hidden" name="client_id" value="${v('client_id')}"><input type="hidden" name="project_id" value="${v('project_id')}"><input type="hidden" name="company_id" value="${v('company_id')}">
+    ${who ? `<div class="muted small">${who}</div>` : ''}
+    <label>O que fazer*<input name="title" required maxlength="200" value="${v('title')}" placeholder="Ex.: perguntar se gostou da demo"></label>
+    <label>Quando*<input name="due_on" type="date" required value="${esc(r.due_on || plus(3))}"></label>
+    <div class="row">${[[1, 'Amanhã'], [3, 'Em 3 dias'], [7, 'Em 1 semana'], [30, 'Em 1 mês']].map(([n, l]) => `<button type="button" class="btn sm" data-action="rem-in" data-d="${plus(n)}">${l}</button>`).join('')}</div>
+    <div class="row"><button class="btn primary">Salvar</button>${r.id ? `<button type="button" class="btn danger" data-action="rem-del" data-id="${r.id}">Excluir</button>` : ''}</div></form>`;
+}
+/* ---- meta do mês e mensalidades ---- */
+function goalCard() {
+  const goal = Number(S.settings?.monthly_goal || 0), ms = periodStart('mes');
+  const got = sum(S.payments.filter((p) => p.paid_at && p.paid_at >= ms), (p) => p.amount);
+  const mrr = sum(S.projects.filter((p) => monthlyActive(p)), (p) => p.monthly_fee);
+  const late = S.payments.filter((p) => p.kind === 'mensalidade' && !p.paid_at && p.due_date && p.due_date < today()).length;
+  const mes = new Date().toLocaleDateString('pt-BR', { month: 'long' });
+  const pct = goal ? Math.min(100, (got / goal) * 100) : 0;
+  return `<section class="card goal reveal" style="--i:3"><div class="row between"><h2>Meta de ${mes}</h2><a class="small" href="#/config">${goal ? 'alterar' : 'definir'}</a></div>
+    ${goal ? `<div class="goal-v"><span class="num">${brl(got)}</span> <span class="muted">de ${brl(goal)}</span></div><div class="bar"><i style="--p:${pct.toFixed(1)}%"></i></div>
+      <div class="muted small">${got >= goal ? 'Meta batida.' : 'Faltam ' + brl(goal - got) + '.'}</div>` : '<div class="muted small">Defina uma meta mensal em Ajustes para acompanhar aqui.</div>'}
+    <div class="goal-m"><span>Mensalidades ativas</span><b class="num">${brl(mrr)}/mês</b></div>${late ? `<div class="small neg">${late} mensalidade${late === 1 ? '' : 's'} atrasada${late === 1 ? '' : 's'}</div>` : ''}</section>`;
+}
 /* cartões coloridos com minigráfico (últimos 8 meses) */
 function sparkSVG(s, id) {
   const W = 200, H = 54, max = Math.max(1, ...s);
@@ -509,11 +644,14 @@ function vDashboard() {
         <a class="tile red reveal" style="--i:2" href="#/projetos"><div class="ic"><svg viewBox="0 0 24 24">${ICON.projetos}</svg></div><div><div class="n">${cnt(active.length, 'int')}</div><div class="l">Projetos em andamento</div></div></a>
         <div class="tile reveal" style="--i:3"><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3 2.5 20h19z"/><path d="M12 10v4M12 17.5h0"/></svg></div><div><div class="n ${al.length ? 'neg' : ''}">${cnt(al.length, 'int')}</div><div class="l">Alertas pendentes</div></div></div>
       </div>
+      ${goalCard()}
       <section class="card donut-card reveal" style="--i:4"><h2>Projetos por etapa</h2>${donutHTML(active)}</section>
     </div>
     <div class="mini">${miniProjects(active)}</div>
     <section class="alerts reveal" style="--i:5"><div class="section" style="margin-top:4px"><h2>Alertas</h2></div>
       ${al.length ? `<div class="stack">${al.map((a) => `<a class="card alert ${a.lvl === 'bad' ? 'bad' : ''}" href="${esc(a.href)}">${esc(a.txt)}</a>`).join('')}</div>` : '<div class="empty">Nada pendente.</div>'}</section>
+    <section class="rem reveal" style="--i:6"><div class="section" style="margin-top:4px"><h2>Lembretes</h2><div class="row" style="gap:12px"><a class="small" href="#/lembretes">ver todos</a><button class="btn sm" data-action="new-reminder">+ Lembrete</button></div></div>
+      ${(() => { const items = [...pendingReminders().map((r) => [r.due_on, reminderCard(r)]), ...leadsWithAction().map((l) => [l.next_action_at, leadDueCard(l)])].sort((a, b) => a[0].localeCompare(b[0])).slice(0, 5); return items.length ? `<div class="stack">${items.map((x) => x[1]).join('')}</div>` : '<div class="empty">Nenhum lembrete. Crie um para não esquecer de retomar um cliente ou lead.</div>'; })()}</section>
   </div>`;
 }
 /* animações e interação pós-render */
@@ -592,8 +730,9 @@ function vClient(id) {
   }
   const wa = waLink(c.whatsapp, `Olá, ${c.name}!`);
   return `<div class="page-h"><div><a class="small" href="#/clientes">← Clientes</a><h1>${esc(c.name)}</h1><div class="muted">${esc(c.company || '')}</div></div>
-    <div class="row"><button class="btn sm" data-action="edit-client" data-id="${id}">Editar</button></div></div>
+    <div class="row"><button class="btn sm" data-action="new-reminder" data-client="${id}">Lembrar</button><button class="btn sm" data-action="edit-client" data-id="${id}">Editar</button></div></div>
   <div class="card"><dl class="kv" style="margin:0">
+    ${c.lead_id ? `<dt>Origem</dt><dd>Lead Finder · <a href="#/leads/${c.lead_id}">ver lead</a></dd>` : ''}
     ${c.whatsapp ? `<dt>WhatsApp</dt><dd>${esc(c.whatsapp)} ${wa ? `<a href="${esc(wa)}" target="_blank" rel="noopener noreferrer">abrir</a>` : ''}</dd>` : ''}
     ${c.email ? `<dt>E-mail</dt><dd><a href="mailto:${esc(c.email)}">${esc(c.email)}</a></dd>` : ''}
     ${c.instagram ? `<dt>Instagram</dt><dd>${esc(c.instagram)}</dd>` : ''}
@@ -632,9 +771,10 @@ function vProjects() {
 function paymentCard(p) {
   const pr = projectOf(p.project_id);
   const late = !p.paid_at && p.due_date && p.due_date < today();
-  return `<div class="card"><div class="item"><div><div class="t">${brl(p.amount)} <span class="badge">${PAY_KINDS[p.kind] || p.kind}</span> ${p.paid_at ? '<span class="badge ok">pago</span>' : late ? '<span class="badge bad">atrasado</span>' : '<span class="badge mid">pendente</span>'}</div>
+  const ref = p.kind === 'mensalidade' && p.ref_month ? ' ' + new Date(p.ref_month + 'T12:00:00').toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' }).replace('.', '') : '';
+  return `<div class="card"><div class="item"><div><div class="t">${brl(p.amount)} <span class="badge">${PAY_KINDS[p.kind] || p.kind}${ref}</span> ${p.paid_at ? '<span class="badge ok">pago</span>' : late ? '<span class="badge bad">atrasado</span>' : '<span class="badge mid">pendente</span>'}</div>
     <div class="muted small">${esc(pr?.name || '')} ${p.paid_at ? '· pago em ' + fmtDate(p.paid_at) : p.due_date ? '· vence ' + fmtDate(p.due_date) : ''} ${p.method ? '· ' + esc(p.method) : ''}</div>${p.notes ? `<div class="small">${esc(p.notes)}</div>` : ''}</div>
-    <div class="row">${!p.paid_at ? `<button class="btn sm primary" data-action="pay-today" data-id="${p.id}">Pago hoje</button>` : ''}
+    <div class="row">${!p.paid_at ? `<button class="btn sm primary" data-action="pay-today" data-id="${p.id}">Pago hoje</button><button class="btn sm" data-action="pix" data-id="${p.id}">Pix</button>` : ''}
     ${!p.paid_at && p.due_date ? `<a class="btn sm" target="_blank" rel="noopener noreferrer" href="${esc(gcal('Cobrar ' + brl(p.amount) + ' — ' + (pr?.name || ''), p.due_date, 'Pagamento do projeto ' + (pr?.name || '')))}">Agenda</a>` : ''}
     <button class="btn sm" data-action="edit-payment" data-id="${p.id}">Editar</button></div></div></div>`;
 }
@@ -650,7 +790,8 @@ function vProject(id) {
   if (!p) return '<div class="empty">Projeto não encontrado.</div>';
   const c = clientOf(p.client_id);
   const paid = paidOf(id), bal = balanceOf(p);
-  const tabs = [['resumo', 'Resumo'], ['onde', 'Onde está tudo'], ['pagamentos', 'Pagamentos'], ['arquivos', 'Arquivos'], ['historico', 'Histórico']];
+  const chk = checklistOf(p);
+  const tabs = [['resumo', 'Resumo'], ['onde', 'Onde está tudo'], ['pagamentos', 'Pagamentos'], ['entrega', `Entrega ${chk.done}/${chk.items.length}`], ['horas', 'Horas'], ['arquivos', 'Arquivos'], ['historico', 'Histórico']];
   const idx = STAGES.findIndex(([k]) => k === p.stage);
   const nextStage = STAGES[idx + 1];
   let body = '';
@@ -659,7 +800,7 @@ function vProject(id) {
     const first = (c?.name || '').split(' ')[0];
     const msgs = [
       ['Demo pronta', `Olá, ${first}! A demo do site ${p.name} está pronta. Posso te mostrar?`],
-      ['Cobrar pagamento', `Olá, ${first}! Segue o pagamento referente ao site ${p.name}: ${brl(nextPay ? nextPay.amount : bal)}${nextPay?.due_date ? ' (vencimento ' + fmtDate(nextPay.due_date) + ')' : ''}.${S.settings?.pix_key ? ' Chave Pix: ' + S.settings.pix_key : ''}`],
+      ['Cobrar pagamento', `Olá, ${first}! Segue o pagamento referente ao site ${p.name}: ${brl(nextPay ? nextPay.amount : bal)}${nextPay?.due_date ? ' (vencimento ' + fmtDate(nextPay.due_date) + ')' : ''}.${pixText(nextPay ? nextPay.amount : bal, nextPay?.id)}`],
       ['Site no ar', `Olá, ${first}! Seu site ${p.name} está no ar${p.live_url ? ': ' + p.live_url : '.'}`],
     ];
     body = `<div class="grid g3"><div class="stat"><div class="k">Valor</div><div class="v">${brl(p.price)}</div></div><div class="stat"><div class="k">Recebido</div><div class="v pos">${brl(paid)}</div></div><div class="stat"><div class="k">Saldo</div><div class="v warn">${brl(bal)}</div></div></div>
@@ -668,11 +809,13 @@ function vProject(id) {
       <dt>Prazo</dt><dd>${fmtDate(p.due_date)} ${p.due_date ? `<a target="_blank" rel="noopener noreferrer" href="${esc(gcal('Entrega: ' + p.name, p.due_date, 'Cliente: ' + (c?.name || '')))}">Google Agenda</a>` : ''}</dd>
       <dt>Demo</dt><dd>${p.demo_url ? `<a target="_blank" rel="noopener noreferrer" href="${esc(safeUrl(p.demo_url))}">${esc(p.demo_url)}</a>` : '—'}</dd>
       <dt>Site no ar</dt><dd>${p.live_url ? `<a target="_blank" rel="noopener noreferrer" href="${esc(safeUrl(p.live_url))}">${esc(p.live_url)}</a>` : '—'}</dd>
+      <dt>Mensalidade</dt><dd>${Number(p.monthly_fee) > 0 ? `${brl(p.monthly_fee)}/mês · vence dia ${p.monthly_day || 10}${p.monthly_start ? ' · desde ' + fmtMonth(p.monthly_start) : ''}${p.monthly_end ? ' até ' + fmtMonth(p.monthly_end) : ''}${monthlyActive(p) ? '' : ' <span class="badge">inativa</span>'}` : '<span class="muted">não tem</span> <button class="link" data-action="edit-project" data-id="' + id + '">definir</button>'}</dd>
+      <dt>Status do site</dt><dd>${siteStatus(p)}</dd>
       <dt>Publicado</dt><dd>${p.published_at ? fmtDate(p.published_at) + ' <button class="link" data-action="set-published" data-id="' + id + '" data-v="0">desmarcar</button>' : 'não <button class="link" data-action="set-published" data-id="' + id + '" data-v="1">marcar como publicado</button>'}</dd>
       ${p.notes ? `<dt>Escopo/notas</dt><dd>${esc(p.notes)}</dd>` : ''}</dl></div>
     <div class="section"><h2>Mensagens e documentos</h2></div>
     <div class="row">${c?.whatsapp ? msgs.map(([n, t]) => `<a class="btn sm" target="_blank" rel="noopener noreferrer" href="${esc(waLink(c.whatsapp, t))}">WhatsApp: ${n}</a>`).join('') : '<span class="muted small">Cadastre o WhatsApp do cliente para ver os atalhos.</span>'}
-    <a class="btn sm" href="#/doc/${id}">Orçamento / contrato (PDF)</a></div>
+    <a class="btn sm" href="#/doc/${id}">Orçamento / contrato (PDF)</a>${nextPay || bal > 0 ? `<button class="btn sm" data-action="pix-project" data-id="${id}">Pix de ${brl(nextPay ? nextPay.amount : bal)}</button>` : ''}</div>
     <div class="section"><h2>Zona de perigo</h2></div><button class="btn danger sm" data-action="del-project" data-id="${id}">Excluir projeto</button>`;
   } else if (S.ptab === 'onde') {
     const ss = S.services.filter((s) => s.project_id === id);
@@ -682,6 +825,21 @@ function vProject(id) {
     const pays = S.payments.filter((x) => x.project_id === id);
     body = `<div class="row between"><span class="muted small">Recebido ${brl(paid)} de ${brl(p.price)}</span><button class="btn sm primary" data-action="new-payment" data-project="${id}">+ Pagamento</button></div>
     <div class="stack" style="margin-top:10px">${pays.map(paymentCard).join('') || '<div class="empty">Nenhum pagamento registrado.</div>'}</div>`;
+  } else if (S.ptab === 'entrega') {
+    body = `<div class="row between"><span class="muted small">${chk.done} de ${chk.items.length} itens. O modelo da lista fica em Ajustes.</span></div>
+    <div class="bar" style="margin:10px 0 14px"><i style="--p:${chk.items.length ? ((chk.done / chk.items.length) * 100).toFixed(1) : 0}%"></i></div>
+    <div class="card checklist">${chk.items.map((it, i) => { const d = (p.checklist || {})[it]; return `<label class="ck"><input type="checkbox" data-action-change="check-item" data-id="${id}" data-i="${i}" ${d ? 'checked' : ''}><span>${esc(it)}</span>${d ? `<em class="muted small">${fmtDate(d)}</em>` : ''}</label>`; }).join('')}</div>`;
+  } else if (S.ptab === 'horas') {
+    const es = S.timeEntries.filter((e) => e.project_id === id);
+    const min = sum(es, (e) => e.minutes), h = min / 60;
+    const t = X.timerGet();
+    body = `<div class="grid g3"><div class="stat"><div class="k">Horas</div><div class="v">${X.fmtHours(min)}</div></div><div class="stat"><div class="k">Valor por hora</div><div class="v">${h ? brl(Number(p.price) / h) : '—'}</div></div><div class="stat"><div class="k">Recebido por hora</div><div class="v">${h ? brl((paid + sum(S.payments.filter((x) => x.project_id === id && x.paid_at && x.kind === 'mensalidade'), (x) => x.amount)) / h) : '—'}</div></div></div>
+    <div class="card" style="margin-top:12px"><div class="row between"><div><div class="t" style="font-weight:600">Cronômetro</div><div class="muted small">${t ? (t.pid === id ? 'Rodando neste projeto.' : 'Rodando em outro projeto.') : 'Conta o tempo enquanto você trabalha. Fica salvo neste aparelho até parar.'}</div></div>
+      ${t && t.pid === id ? '<button class="btn primary" data-action="timer-stop">Parar e salvar</button>' : `<button class="btn primary" data-action="timer-start" data-id="${id}">Começar</button>`}</div></div>
+    <form class="card stack" data-form="time" style="margin-top:12px"><input type="hidden" name="project_id" value="${id}"><div class="t" style="font-weight:600">Lançar horas</div>
+      <div class="two"><label>Tempo*<input name="time" required placeholder="1h30, 45 ou 2:15"></label><label>Dia<input name="worked_on" type="date" value="${today()}"></label></div>
+      <label>O que foi feito<input name="note" maxlength="500"></label><button class="btn">Lançar</button></form>
+    <div class="stack" style="margin-top:12px">${es.map((e) => `<div class="card item"><div><div class="t">${X.fmtHours(e.minutes)} <span class="muted small">· ${fmtDate(e.worked_on)}</span></div>${e.note ? `<div class="small">${esc(e.note)}</div>` : ''}</div><button class="btn sm danger" data-action="del-time" data-id="${e.id}">Remover</button></div>`).join('') || '<div class="empty">Nenhuma hora lançada.</div>'}</div>`;
   } else if (S.ptab === 'arquivos') {
     const ls = S.links.filter((l) => l.project_id === id);
     body = `<div class="row between"><span class="muted small">Links para contrato, logo, briefing (Drive, etc.)</span><button class="btn sm primary" data-action="new-link" data-project="${id}">+ Link</button></div>
@@ -690,13 +848,47 @@ function vProject(id) {
     body = `<div class="stack">${S.log.filter((l) => l.project_id === id).map(logCard).join('') || '<div class="empty">Sem histórico.</div>'}</div>`;
   }
   return `<div class="page-h"><div><a class="small" href="#/projetos">← Projetos</a><h1>${esc(p.name)}</h1><a href="#/clientes/${p.client_id}" class="muted">${esc(c?.name || '')}</a></div>
-    <div class="row"><button class="btn sm" data-action="edit-project" data-id="${id}">Editar</button></div></div>
+    <div class="row"><button class="btn sm" data-action="new-reminder" data-project="${id}">Lembrar</button><button class="btn sm" data-action="edit-project" data-id="${id}">Editar</button></div></div>
+  ${p.lead_id ? `<p class="muted small" style="margin:-8px 0 12px">Veio do Lead Finder · <a href="#/leads/${p.lead_id}">ver lead</a></p>` : ''}
   <div class="card"><div class="item"><div class="stack" style="flex:1"><div class="row">${stageBadge(p)}</div>
     <div class="steps">${STAGES.map((_, i) => `<i class="${i < idx ? 'on' : i === idx ? 'now' : ''}"></i>`).join('')}</div></div></div>
     <div class="row" style="margin-top:6px"><select data-action-change="stage" data-id="${id}" style="flex:1;margin:0">${STAGES.map(([k, n]) => `<option value="${k}" ${k === p.stage ? 'selected' : ''}>${n}</option>`).join('')}</select>
     ${nextStage ? `<button class="btn primary" data-action="next-stage" data-id="${id}">→ ${esc(nextStage[1])}</button>` : ''}</div>
     <p class="muted small" style="margin:8px 0 0">Pagamento final e publicação podem acontecer em qualquer ordem.</p></div>
   <div class="tabs">${tabs.map(([k, n]) => `<button class="tab ${S.ptab === k ? 'on' : ''}" data-action="ptab" data-tab="${k}">${n}</button>`).join('')}</div>${body}`;
+}
+const fmtMonth = (d) => new Date(String(d).slice(0, 7) + '-15T12:00:00').toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' }).replace('.', '');
+function checklistOf(p) {
+  const tpl = Array.isArray(S.settings?.checklist_template) && S.settings.checklist_template.length ? S.settings.checklist_template : X.DEFAULT_CHECKLIST;
+  const items = [...tpl, ...Object.keys(p.checklist || {}).filter((k) => !tpl.includes(k))];
+  return { items, done: items.filter((k) => (p.checklist || {})[k]).length };
+}
+function siteStatus(p) {
+  if (!p.live_url) return '<span class="muted">cadastre o link do site no ar para monitorar</span>';
+  const c = latestChecks().get(p.id);
+  const btn = `<button class="link" data-action="site-check" data-id="${p.id}">verificar agora</button>`;
+  if (!c) return `<span class="muted">ainda não verificado</span> ${btn}`;
+  const dom = c.domain_expires ? ` · domínio vence ${fmtDate(c.domain_expires)}` : '';
+  return c.ok ? `<span class="badge ok">no ar</span> ${c.ms ? Math.round(c.ms) + ' ms · ' : ''}${c.https ? 'HTTPS ok' : '<span class="warn">sem HTTPS</span>'}${dom} <span class="muted small">(${fmtTs(c.checked_at)})</span> ${btn}`
+    : `<span class="badge bad">com problema</span> ${esc(c.error || '')}${dom} <span class="muted small">(${fmtTs(c.checked_at)})</span> ${btn}`;
+}
+function pixText(amount, payId) {
+  const st = S.settings;
+  if (!st?.pix_key || !(amount > 0)) return st?.pix_key ? ' Chave Pix: ' + st.pix_key : '';
+  try { return `\n\nPix copia e cola:\n${X.pixPayload({ key: st.pix_key, name: st.business_name, city: st.pix_city, amount, txid: payId ? payId.replace(/-/g, '').slice(0, 25) : '' })}`; }
+  catch { return ' Chave Pix: ' + st.pix_key; }
+}
+function showPix(amount, title, projectId, payId) {
+  const st = S.settings;
+  if (!st?.pix_key) { toast('Cadastre sua chave Pix em Ajustes primeiro.', true); location.hash = '#/config'; return; }
+  const payload = X.pixPayload({ key: st.pix_key, name: st.business_name, city: st.pix_city, amount, txid: payId ? payId.replace(/-/g, '').slice(0, 25) : '' });
+  const pr = projectOf(projectId), c = pr && clientOf(pr.client_id);
+  const msg = `Olá, ${(c?.name || '').split(' ')[0]}! Segue o Pix de ${brl(amount)} referente ao site ${pr?.name || ''}.\n\nPix copia e cola:\n${payload}`;
+  openModal('Cobrar com Pix', `<div class="pix stack"><div class="qr">${X.qrSVG(payload)}</div>
+    <div style="text-align:center"><div class="num" style="font-size:1.7rem">${brl(amount)}</div><div class="muted small">${esc(title)}</div></div>
+    <label>Pix copia e cola<textarea readonly class="mono small" rows="4">${esc(payload)}</textarea></label>
+    <div class="row"><button class="btn primary" data-action="copy" data-text="${esc(payload)}">Copiar código</button>${c?.whatsapp ? `<a class="btn" target="_blank" rel="noopener noreferrer" href="${esc(waLink(c.whatsapp, msg))}">Enviar no WhatsApp</a>` : ''}</div>
+    <p class="muted small" style="margin:0">Recebedor: ${esc(st.business_name || '—')} · ${esc(st.pix_city || 'cidade não informada')}. O valor já vai preenchido no app do banco. Confira o nome e a cidade em Ajustes.</p></div>`);
 }
 function formProject(p = {}, presetClient = '') {
   const cid = p.client_id || presetClient;
@@ -706,7 +898,11 @@ function formProject(p = {}, presetClient = '') {
     <div class="two"><label>Valor (R$)<input name="price" type="number" step="0.01" min="0" inputmode="decimal" value="${esc(p.price ?? '')}"></label><label>Prazo<input name="due_date" type="date" value="${esc(p.due_date || '')}"></label></div>
     <label>Etapa<select name="stage">${STAGES.map(([k, n]) => `<option value="${k}" ${k === (p.stage || 'demo') ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
     <label>Link da demo<input name="demo_url" value="${esc(p.demo_url || '')}" placeholder="GitHub Pages ou arquivo"></label>
-    <label>Link do site no ar<input name="live_url" value="${esc(p.live_url || '')}"></label>
+    <label>Link do site no ar<input name="live_url" value="${esc(p.live_url || '')}" placeholder="https://… (usado no monitor do site)"></label>
+    <fieldset class="fs"><legend>Mensalidade (manutenção/hospedagem)</legend>
+      <div class="two"><label>Valor por mês (R$)<input name="monthly_fee" type="number" step="0.01" min="0" inputmode="decimal" value="${esc(p.monthly_fee ?? '')}" placeholder="vazio = sem mensalidade"></label><label>Dia do vencimento<input name="monthly_day" type="number" min="1" max="28" value="${esc(p.monthly_day ?? '')}" placeholder="10"></label></div>
+      <div class="two"><label>Cobrar a partir de<input name="monthly_start" type="month" value="${esc((p.monthly_start || '').slice(0, 7))}"></label><label>Até (opcional)<input name="monthly_end" type="month" value="${esc((p.monthly_end || '').slice(0, 7))}"></label></div>
+      <p class="muted small" style="margin:0">A Central cria a cobrança de cada mês sozinha, a partir do mês escolhido.</p></fieldset>
     <label>Escopo / notas<textarea name="notes">${esc(p.notes || '')}</textarea></label>
     <button class="btn primary">Salvar</button></form>`;
 }
@@ -838,7 +1034,9 @@ function vSettings() {
   <form class="card stack" data-form="settings">
     <label>Seu nome / marca<input name="business_name" value="${esc(st.business_name || '')}"></label>
     <div class="two"><label>WhatsApp<input name="business_whatsapp" value="${esc(st.business_whatsapp || '')}"></label><label>E-mail<input name="business_email" type="email" value="${esc(st.business_email || '')}"></label></div>
-    <div class="two"><label>CPF/CNPJ<input name="business_doc" value="${esc(st.business_doc || '')}"></label><label>Chave Pix<input name="pix_key" value="${esc(st.pix_key || '')}"></label></div>
+    <div class="two"><label>CPF/CNPJ<input name="business_doc" value="${esc(st.business_doc || '')}"></label><label>Chave Pix<input name="pix_key" value="${esc(st.pix_key || '')}" placeholder="CPF, celular, e-mail ou aleatória"></label></div>
+    <div class="two"><label>Cidade (vai no Pix)<input name="pix_city" maxlength="40" value="${esc(st.pix_city || '')}" placeholder="São Paulo"></label><label>Meta de faturamento por mês (R$)<input name="monthly_goal" type="number" step="0.01" min="0" inputmode="decimal" value="${esc(st.monthly_goal ?? '')}"></label></div>
+    <label>Checklist de entrega (um item por linha)<textarea name="checklist_template" rows="8">${esc((Array.isArray(st.checklist_template) && st.checklist_template.length ? st.checklist_template : X.DEFAULT_CHECKLIST).join('\n'))}</textarea></label>
     <button class="btn primary">Salvar</button></form>
   <div class="section"><h2>Segurança</h2></div>
   <div class="card stack">
@@ -848,15 +1046,45 @@ function vSettings() {
     <div class="item"><div><div class="t">Bloquear agora</div><div class="muted small">Bloqueia sozinho após 5 min parado ou 1 min em segundo plano.</div></div><button class="btn sm" data-action="lock">Bloquear</button></div>
   </div>
   <div class="section"><h2>Backup</h2></div>
-  <div class="card stack"><p class="muted small" style="margin:0">Gera um arquivo com todos os dados (senhas continuam criptografadas). No celular, escolha “Drive” no menu de compartilhar para guardar lá.</p><button class="btn" data-action="export">Exportar tudo</button>
+  ${vDrive(st)}
+  <div class="card stack" style="margin-top:12px"><p class="muted small" style="margin:0">Gera um arquivo com todos os dados (senhas continuam criptografadas). No celular, escolha “Drive” no menu de compartilhar para guardar lá.</p><button class="btn" data-action="export">Exportar tudo</button>
     <p class="muted small" style="margin:0">Restaurar: lê um arquivo de backup e recoloca os registros (mescla com o que já existe, não apaga nada). Senhas só abrem se o backup for da mesma conta/cofre.</p>
     <label class="btn" style="text-align:center;cursor:pointer">Restaurar de arquivo<input type="file" accept="application/json,.json" data-action-change="restore-file" hidden></label></div>
   <div class="section"><h2>Conta</h2></div>
   <div class="card item"><div><div class="t">${esc(S.user?.email || '')}</div><div class="muted small">Sair apaga a biometria deste aparelho.</div></div><button class="btn sm danger" data-action="logout">Sair</button></div>`;
 }
+function vDrive(st) {
+  const redirect = X.driveRedirect();
+  return `<div class="card stack"><div class="t" style="font-weight:600">Google Drive</div>
+    ${st.drive_client_id ? `<div class="item"><div><div class="muted small">Último envio: ${st.drive_last_backup ? fmtTs(st.drive_last_backup) : 'nunca'}. A Central envia um backup por dia quando você abre o app; se o acesso ao Drive tiver expirado, ela avisa nos alertas e você toca em “Enviar agora”.</div></div>
+      <button class="btn sm primary" data-action="drive-backup">Enviar agora</button></div>` : '<p class="muted small" style="margin:0">Envia o mesmo arquivo do “Exportar tudo” para uma pasta “Central — backups” no seu Drive, uma vez por dia. Precisa de uma configuração única no Google (grátis).</p>'}
+    <details${st.drive_client_id ? '' : ' open'}><summary>${st.drive_client_id ? 'Trocar configuração' : 'Como configurar (uma vez)'}</summary>
+      <ol class="small steps-list">
+        <li>Abra <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer">console.cloud.google.com</a> e crie um projeto (ex.: “Central”).</li>
+        <li>Em “APIs e serviços” > “Biblioteca”, ative a <b>Google Drive API</b>.</li>
+        <li>Em “Tela de consentimento OAuth”: tipo <b>Externo</b>, preencha o nome e adicione seu e-mail em “Usuários de teste”.</li>
+        <li>Em “Credenciais” > “Criar credenciais” > <b>ID do cliente OAuth</b> > Aplicativo da Web.<br>Origem JavaScript: <code>${esc(location.origin)}</code><br>URI de redirecionamento: <code>${esc(redirect)}</code></li>
+        <li>Copie o “ID do cliente” e cole aqui.</li></ol>
+      <form data-form="drive" class="stack"><label>ID do cliente OAuth<input name="drive_client_id" value="${esc(st.drive_client_id || '')}" placeholder="0000-xxxx.apps.googleusercontent.com"></label><button class="btn">Salvar</button></form></details></div>`;
+}
+function buildDump() {
+  return { app: 'central', version: 2, exported_at: new Date().toISOString(), vault_keys: S.vaultRow,
+    tables: { clients: S.clients, projects: S.projects, project_services: S.services, payments: S.payments, expenses: S.expenses, project_links: S.links, activity_log: S.log, time_entries: S.timeEntries, reminders: S.reminders, app_settings: S.settings } };
+}
+async function driveBackup(manual) {
+  const st = S.settings;
+  if (!st?.drive_client_id) return toast('Configure o Google Drive em Ajustes > Backup.', true);
+  const tok = X.driveToken();
+  if (!tok) { if (manual) location.href = X.driveAuthUrl(st.drive_client_id); return; }
+  const r = await X.driveUpload(tok, st.drive_folder_id, `central-backup-${today()}.json`, JSON.stringify(buildDump()));
+  const up = await sb.from('app_settings').upsert({ user_id: S.user.id, drive_folder_id: r.folderId, drive_last_backup: new Date().toISOString() }, { onConflict: 'user_id' }).select().single();
+  if (!up.error) S.settings = up.data;
+  X.driveClearPending();
+  toast('Backup enviado ao Google Drive');
+  if (location.hash.startsWith('#/config') || location.hash.startsWith('#/painel')) rerenderKeepScroll();
+}
 async function exportAll() {
-  const dump = { app: 'central', version: 1, exported_at: new Date().toISOString(), vault_keys: S.vaultRow,
-    tables: { clients: S.clients, projects: S.projects, project_services: S.services, payments: S.payments, expenses: S.expenses, project_links: S.links, activity_log: S.log, app_settings: S.settings } };
+  const dump = buildDump();
   const file = new File([JSON.stringify(dump, null, 2)], `central-backup-${today()}.json`, { type: 'application/json' });
   if (navigator.canShare?.({ files: [file] })) {
     try { await navigator.share({ files: [file], title: 'Backup Central' }); return; } catch (e) { if (e.name === 'AbortError') return; }
@@ -869,7 +1097,7 @@ async function exportAll() {
   toast('Backup baixado');
 }
 
-const RESTORE_ORDER = ['clients', 'projects', 'project_services', 'payments', 'expenses', 'project_links', 'activity_log'];
+const RESTORE_ORDER = ['clients', 'projects', 'project_services', 'payments', 'expenses', 'project_links', 'activity_log', 'time_entries', 'reminders'];
 async function restoreBackup(file) {
   if (!file) return;
   if (file.size > 20 * 1024 * 1024) return toast('Arquivo grande demais para ser um backup do Central.', true);
@@ -884,7 +1112,9 @@ async function restoreBackup(file) {
   if (!(await confirmModal(`Restaurar backup de ${fmtDate((dump.exported_at || '').slice(0, 10))}? (${resumo}). Registros com o mesmo id serão sobrescritos; nada é apagado.`))) return;
   const uid = S.user.id;
   for (const k of RESTORE_ORDER) {
-    const rows = (t[k] || []).map((r) => ({ ...r, user_id: uid }));
+    // Ligações com leads que não existem nesta conta são removidas (senão o banco recusa).
+    const leadIds = new Set(S.leadsLite.map((l) => l.id));
+    const rows = (t[k] || []).map((r) => { const o = { ...r, user_id: uid }; if (o.lead_id && !leadIds.has(o.lead_id)) o.lead_id = null; if (k === 'reminders' && o.company_id && !leadIds.has(o.company_id)) o.company_id = null; return o; });
     for (let i = 0; i < rows.length; i += 200) {
       const r = await sb.from(k).upsert(rows.slice(i, i + 200), { onConflict: 'id' });
       if (r.error) throw new Error(`Falha em ${k}: ${r.error.message}`);
@@ -999,6 +1229,40 @@ const act = {
   'disable-bio': () => guard(async () => { await V.disableBiometric(); toast('Biometria desativada'); route(); }),
   'change-pw': () => openModal('Trocar senha', `<form data-form="changepw" class="stack"><label>Nova senha (12+ caracteres)<input name="pw" type="password" autocomplete="new-password" minlength="12" required></label><label>Repita<input name="pw2" type="password" autocomplete="new-password" minlength="12" required></label><button class="btn primary">Trocar</button></form>`),
   export: () => guard(exportAll),
+  'drive-backup': () => guard(() => driveBackup(true)),
+  pix: (el) => { const p = S.payments.find((x) => x.id === el.dataset.id); if (p) showPix(Number(p.amount), `${PAY_KINDS[p.kind] || 'Pagamento'} — ${projectOf(p.project_id)?.name || ''}`, p.project_id, p.id); },
+  'pix-project': (el) => {
+    const p = projectOf(el.dataset.id); if (!p) return;
+    const nx = S.payments.filter((x) => x.project_id === p.id && !x.paid_at).sort((a, b) => String(a.due_date || '9').localeCompare(String(b.due_date || '9')))[0];
+    showPix(nx ? Number(nx.amount) : balanceOf(p), nx ? `${PAY_KINDS[nx.kind]} — ${p.name}` : `Saldo — ${p.name}`, p.id, nx?.id);
+  },
+  'site-check': (el) => guard(async () => { el.disabled = true; el.textContent = 'verificando…'; const r = await checkSites([el.dataset.id]); toast(r[0]?.ok ? 'Site no ar' : r[0] ? 'Site com problema: ' + (r[0].error || '') : 'Nada para verificar', !r[0]?.ok); }),
+  'new-reminder': (el) => openModal('Novo lembrete', formReminder({}, { client_id: el.dataset.client, project_id: el.dataset.project, company_id: el.dataset.company })),
+  'rem-edit': (el) => openModal('Editar lembrete', formReminder(S.reminders.find((r) => r.id === el.dataset.id) || {})),
+  'rem-in': (el) => { const i = el.closest('form')?.querySelector('[name=due_on]'); if (i) i.value = el.dataset.d; },
+  'rem-done': (el) => guard(async () => {
+    const r = S.reminders.find((x) => x.id === el.dataset.id); if (!r) return;
+    const row = await save('reminders', r.id, { done_at: r.done_at ? null : new Date().toISOString() });
+    Object.assign(r, row); rerenderKeepScroll();
+  }),
+  'rem-del': (el) => guard(async () => { if (!(await confirmModal('Excluir este lembrete?'))) return; await remove('reminders', el.dataset.id); S.reminders = S.reminders.filter((r) => r.id !== el.dataset.id); closeModal(); rerenderKeepScroll(); }),
+  'rem-toggle-done': () => { S.remDone = !S.remDone; rerenderKeepScroll(); },
+  'timer-start': (el) => guard(async () => {
+    const t = X.timerGet();
+    if (t && !(await confirmModal(`Já tem um cronômetro rodando em “${projectOf(t.pid)?.name || 'outro projeto'}”. Descartar e começar neste?`, 'Descartar e começar'))) return;
+    X.timerStart(el.dataset.id); renderTimer(); rerenderKeepScroll();
+  }),
+  'timer-stop': () => guard(async () => {
+    const t = X.timerGet(); if (!t) return;
+    const mins = Math.max(1, Math.min(1440, Math.round((Date.now() - t.start) / 60000)));
+    const d = await askModal('Salvar horas', `<form data-form="ask" class="stack"><p class="muted small" style="margin:0">${esc(projectOf(t.pid)?.name || '')}</p><label>Tempo (minutos)<input name="min" type="number" min="1" max="1440" value="${mins}" required></label><label>O que foi feito<input name="note" maxlength="500"></label>
+      <div class="row"><button class="btn primary">Salvar</button><button type="button" class="btn danger" data-action="timer-discard">Descartar tempo</button></div></form>`);
+    if (!d) return;
+    const row = await save('time_entries', null, { project_id: t.pid, minutes: Math.max(1, Math.min(1440, Number(d.min) || mins)), note: nn(d.note), worked_on: today() });
+    X.timerClear(); S.timeEntries = [row, ...S.timeEntries]; renderTimer(); toast('Horas salvas'); rerenderKeepScroll();
+  }),
+  'timer-discard': () => { X.timerClear(); closeModal(null); renderTimer(); toast('Cronômetro descartado'); rerenderKeepScroll(); },
+  'del-time': (el) => guard(async () => { await remove('time_entries', el.dataset.id); S.timeEntries = S.timeEntries.filter((e) => e.id !== el.dataset.id); rerenderKeepScroll(); }),
   series: (el) => {
     S.series = S.series || { r: true, e: true };
     const k = el.dataset.s, other = k === 'r' ? 'e' : 'r';
@@ -1009,8 +1273,26 @@ const act = {
     setChartIndex(S.chart.i);
   },
 };
+// Lead que fechou: cria cliente + projeto com os dados do lead (uma vez só por lead).
+async function convertLead(c) {
+  const exist = S.clients.find((x) => x.lead_id === c.id);
+  if (exist) { location.hash = '#/clientes/' + exist.id; return null; }
+  const d = await askModal('Transformar em cliente', `<form data-form="ask" class="stack"><p class="muted small" style="margin:0">Cria o cliente e o projeto com os dados do lead (telefone, Instagram, endereço).</p>
+    <label>Nome do cliente*<input name="name" required value="${esc(c.name)}"></label>
+    <label>Nome do projeto*<input name="project" required value="${esc('Site ' + c.name)}"></label>
+    <div class="two"><label>Valor (R$)<input name="price" type="number" step="0.01" min="0" inputmode="decimal" value="${esc(c.estimated_value ?? '')}"></label>
+    <label>Etapa<select name="stage">${STAGES.map(([k, n]) => `<option value="${k}">${n}</option>`).join('')}</select></label></div>
+    <button class="btn primary block">Criar cliente e projeto</button></form>`);
+  if (!d) return null;
+  const cl = await save('clients', null, { name: String(d.name).trim(), company: c.name, whatsapp: nn(c.phone_norm || c.phone), instagram: nn(c.instagram), notes: nn([c.address, c.city, c.state].filter(Boolean).join(', ')), lead_id: c.id });
+  const pr = await save('projects', null, { client_id: cl.id, name: String(d.project).trim(), price: num(d.price), stage: d.stage || 'demo', lead_id: c.id, live_url: null });
+  await logEvent(cl.id, pr.id, 'Cliente vindo do Lead Finder: ' + c.name);
+  await loadAll();
+  return { client: cl, project: pr };
+}
 /* Lead Finder: módulo em leads.js, usando os mesmos utilitários da central */
-LF.init({ sb, esc, toast, openModal, closeModal, askModal, confirmModal, guard, friendly, route, fmtTs, fmtDate, brl, nn, safeUrl, waLink, settings: () => S.settings, userId: () => S.user?.id });
+LF.init({ sb, esc, toast, openModal, closeModal, askModal, confirmModal, guard, friendly, route, fmtTs, fmtDate, brl, nn, safeUrl, waLink, settings: () => S.settings, userId: () => S.user?.id,
+  convertLead, clientForLead: (id) => S.clients.find((c) => c.lead_id === id) || null, newReminder: (companyId) => openModal('Novo lembrete', formReminder({}, { company_id: companyId })) });
 Object.assign(act, LF.actions);
 async function setStage(p, stage) {
   const patch = { stage };
@@ -1031,6 +1313,14 @@ document.addEventListener('change', (e) => {
   if (el.dataset.actionChange === 'pfilter') { S.pfilter = el.value; route(); }
   if (el.dataset.actionChange === 'restore-file') { const f = el.files?.[0]; el.value = ''; guard(() => restoreBackup(f)); }
   if (el.dataset.actionChange === 'stage') guard(() => setStage(projectOf(el.dataset.id), el.value));
+  if (el.dataset.actionChange === 'check-item') guard(async () => {
+    const p = projectOf(el.dataset.id); if (!p) return;
+    const item = checklistOf(p).items[Number(el.dataset.i)]; if (!item) return;
+    const ck = { ...(p.checklist || {}) };
+    if (el.checked) ck[item] = today(); else delete ck[item];
+    const row = await save('projects', p.id, { checklist: ck });
+    Object.assign(p, row); rerenderKeepScroll();
+  });
 });
 $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(null); });
 
@@ -1075,6 +1365,25 @@ const forms = {
     await enterApp();
   },
   ask: (f, d) => closeModal(d),
+  reminder: async (f, d) => {
+    const obj = { title: d.title.trim(), due_on: d.due_on, client_id: nn(d.client_id), project_id: nn(d.project_id), company_id: nn(d.company_id) };
+    const row = await save('reminders', d.id || null, obj);
+    S.reminders = [...S.reminders.filter((r) => r.id !== row.id), row];
+    closeModal(); toast('Lembrete salvo'); rerenderKeepScroll();
+  },
+  time: async (f, d) => {
+    const m = X.parseMinutes(d.time);
+    if (!m || m > 1440) return toast('Tempo inválido. Use, por exemplo, 1h30, 45 ou 2:15.', true);
+    const row = await save('time_entries', null, { project_id: d.project_id, minutes: m, worked_on: d.worked_on || today(), note: nn(d.note) });
+    S.timeEntries = [row, ...S.timeEntries]; toast('Horas lançadas'); rerenderKeepScroll();
+  },
+  drive: async (f, d) => {
+    const id = nn(d.drive_client_id);
+    if (id && !/^[\w.-]+\.apps\.googleusercontent\.com$/.test(id)) return toast('Esse não parece um ID de cliente do Google (termina com .apps.googleusercontent.com).', true);
+    const r = await sb.from('app_settings').upsert({ user_id: S.user.id, drive_client_id: id }, { onConflict: 'user_id' }).select().single();
+    if (r.error) throw r.error;
+    S.settings = r.data; toast(id ? 'Salvo. Toque em “Enviar agora” para conectar.' : 'Google Drive desligado'); rerenderKeepScroll();
+  },
   client: async (f, d) => {
     const obj = { name: d.name.trim(), company: nn(d.company), whatsapp: nn(d.whatsapp), email: nn(d.email), instagram: nn(d.instagram), notes: nn(d.notes) };
     const row = await save('clients', d.id || null, obj);
@@ -1083,7 +1392,10 @@ const forms = {
   },
   project: async (f, d) => {
     const prev = d.id ? projectOf(d.id) : null;
-    const obj = { client_id: d.client_id, name: d.name.trim(), price: num(d.price), due_date: nn(d.due_date), stage: d.stage, demo_url: nn(d.demo_url), live_url: nn(d.live_url), notes: nn(d.notes) };
+    const fee = nn(d.monthly_fee) ? num(d.monthly_fee) : null;
+    const obj = { client_id: d.client_id, name: d.name.trim(), price: num(d.price), due_date: nn(d.due_date), stage: d.stage, demo_url: nn(d.demo_url), live_url: nn(d.live_url), notes: nn(d.notes),
+      monthly_fee: fee, monthly_day: nn(d.monthly_day) ? Math.min(28, Math.max(1, Number(d.monthly_day))) : null,
+      monthly_start: fee && nn(d.monthly_start) ? d.monthly_start + '-01' : fee ? today().slice(0, 7) + '-01' : null, monthly_end: fee && nn(d.monthly_end) ? d.monthly_end + '-01' : null };
     if (d.stage === 'publicacao' && !prev?.published_at) obj.published_at = today();
     const row = await save('projects', d.id || null, obj);
     closeModal(); await refresh();
@@ -1113,7 +1425,10 @@ const forms = {
     closeModal(); await refresh();
   },
   settings: async (f, d) => {
-    const r = await sb.from('app_settings').upsert({ user_id: S.user.id, business_name: nn(d.business_name), business_whatsapp: nn(d.business_whatsapp), business_email: nn(d.business_email), business_doc: nn(d.business_doc), pix_key: nn(d.pix_key) }).select().single();
+    const lines = String(d.checklist_template || '').split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 60).map((x) => x.slice(0, 120));
+    const tpl = lines.length && lines.join('\n') !== X.DEFAULT_CHECKLIST.join('\n') ? lines : null;
+    const r = await sb.from('app_settings').upsert({ user_id: S.user.id, business_name: nn(d.business_name), business_whatsapp: nn(d.business_whatsapp), business_email: nn(d.business_email), business_doc: nn(d.business_doc), pix_key: nn(d.pix_key),
+      pix_city: nn(d.pix_city), monthly_goal: nn(d.monthly_goal) ? num(d.monthly_goal) : null, checklist_template: tpl }).select().single();
     if (r.error) throw r.error;
     S.settings = r.data; toast('Salvo');
   },

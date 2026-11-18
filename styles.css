@@ -400,3 +400,46 @@ a.tile:hover{transform:translateY(-3px)}
 .lf-find.bad ul{color:var(--danger)} .lf-find.mid ul{color:var(--warn)}
 #lf-msg{min-height:150px;font-size:.95rem;line-height:1.45}
 
+
+/* ===== fase 2: meta, lembretes, Pix, cronômetro, checklist ===== */
+@media(min-width:1000px){.dash{grid-template-areas:"kpis kpis" "hero side" "mini side" "alerts rem"}.dash .rem{grid-area:rem}}
+.bar{height:8px;border-radius:5px;background:var(--track);overflow:hidden}
+.bar i{display:block;height:100%;width:var(--p,0%);border-radius:5px;background:var(--accent);animation:barin 1s cubic-bezier(.3,.9,.3,1) both}
+@keyframes barin{from{width:0}}
+.goal h2{margin:0}
+.goal-v{margin:10px 0 8px;font-size:.95rem}.goal-v .num{font-size:1.5rem;font-weight:600}
+.goal .bar{margin-bottom:6px}
+.goal-m{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid var(--hair);font-size:.9rem}
+.goal-m b{font-weight:600}
+.rem-item{display:flex;align-items:center;gap:12px;padding:12px 14px;color:inherit}
+.rem-item .rem-b{flex:1;min-width:0}
+.rem-item .t{font-weight:600;overflow:hidden;text-overflow:ellipsis}
+.rem-item.done .t{text-decoration:line-through;color:var(--muted)}
+.tick{flex:none;width:26px;height:26px;border-radius:50%;border:1.5px solid color-mix(in srgb,var(--accent) 60%,var(--border));background:transparent;color:var(--accent-ink);cursor:pointer;display:grid;place-items:center;font:600 .8rem var(--f-body);transition:background .2s}
+.tick:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)}
+.rem-item.done .tick{background:var(--accent)}
+.tick.lead{border-style:dashed;color:var(--muted);cursor:default}
+.pix .qr{width:230px;height:230px;padding:12px;margin:4px auto 0}
+.qr svg{display:block;width:100%;height:100%}
+.pix textarea{min-height:0;word-break:break-all}
+.timer{position:fixed;z-index:30;left:50%;transform:translateX(-50%);bottom:calc(var(--nav-h) + 26px + env(safe-area-inset-bottom));display:flex;align-items:center;gap:10px;padding:6px 6px 6px 14px;border-radius:999px;
+  background:var(--tipbg);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid color-mix(in srgb,var(--accent) 40%,var(--border));box-shadow:0 12px 30px -10px var(--shadow);max-width:calc(100vw - 24px)}
+.timer i{width:8px;height:8px;border-radius:50%;background:var(--danger);animation:pulse 1.4s ease-in-out infinite}
+.timer a{color:var(--text);font-size:.85rem;max-width:40vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.timer b{font-weight:600;font-variant-numeric:tabular-nums}
+@keyframes pulse{50%{opacity:.3}}
+@media(min-width:900px){.timer{bottom:24px;left:auto;right:24px;transform:none}}
+.checklist{display:grid;gap:2px;padding:8px}
+.ck{display:flex;align-items:center;gap:10px;margin:0;padding:10px 8px;border-radius:10px;color:var(--text);font-size:.95rem;cursor:pointer}
+.ck:hover{background:var(--soft)}
+.ck input{margin:0}
+.ck em{margin-left:auto;font-style:normal}
+.ck input:checked+span{color:var(--muted);text-decoration:line-through}
+.fs{border:1px solid var(--border);border-radius:14px;padding:12px 14px 14px;margin:0 0 12px}
+.fs legend{font-size:.82rem;color:var(--muted);padding:0 6px}
+details summary{cursor:pointer;color:var(--accent2);font-size:.9rem;padding:4px 0}
+[data-mode="light"] details summary{color:var(--accent)}
+.steps-list{padding-left:20px;line-height:1.6}
+.steps-list li+li{margin-top:4px}
+code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.85em;background:var(--inset);border:1px solid var(--hair);padding:1px 5px;border-radius:6px;word-break:break-all}
+a.rem-item{display:flex}

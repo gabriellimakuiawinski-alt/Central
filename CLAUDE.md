@@ -3,10 +3,11 @@
 App pessoal (PWA) do Gabriel para organizar o trabalho de criação de sites: clientes, projetos, pagamentos, despesas e acessos (logins/senhas) de cada projeto. Uso individual, em português do Brasil.
 
 ## Stack
-- Front-end estático, sem build: `index.html`, `app.js` (telas e lógica), `crypto.js` (cofre e biometria), `styles.css`, `sw.js`, `manifest.webmanifest`.
+- Front-end estático, sem build: `index.html`, `app.js` (telas e lógica), `crypto.js` (cofre e biometria), `extras.js` (Pix, Google Drive, cronômetro, checklist), `styles.css`, `sw.js`, `manifest.webmanifest`, `drive-callback.html/.js` (retorno do login do Google).
+- `vendor/qrcode.mjs` é o qrcode-generator 2.0.4 (MIT) copiado localmente.
 - `vendor/supabase.js` é o supabase-js v2 (UMD) copiado localmente (a CSP só permite scripts de 'self').
 - Backend: Supabase, projeto **Central** (ref `llpbtrobjfszgzlvdogr`, região sa-east-1, plano gratuito). URL e chave publishable estão em `config.js` (a chave pública é feita para ficar no navegador).
-- Hospedagem: GitHub Pages, publicado em https://gabriellimakuiawinski-alt.github.io/central/ (repo gabriellimakuiawinski-alt/central, branch main, pasta raiz). Primeiro cadastro já feito (a vaga única está ocupada).
+- Hospedagem: GitHub Pages, publicado em https://gabriellimakuiawinski-alt.github.io/Central/ (repo gabriellimakuiawinski-alt/Central, branch main, pasta raiz). Primeiro cadastro já feito (a vaga única está ocupada).
 
 ## Visual
 - Vidro fosco sobre um fundo liso com 3 manchas desfocadas das cores da paleta (montadas por `theme.js` em `.aurora`). Sem desenhos/ilustrações no fundo, sem brilhos neon (o usuário achou que tinha "cara de IA").
@@ -25,7 +26,7 @@ App pessoal (PWA) do Gabriel para organizar o trabalho de criação de sites: cl
 - Sem mensalidade/recorrência por enquanto. Despesas existem para calcular lucro.
 
 ## Tabelas (schema public)
-vault_keys, clients, projects, project_services, payments, expenses, project_links, activity_log, app_settings. Migrações já aplicadas: schema inicial, links/config/2FA obrigatório, cadastro único.
+vault_keys, clients, projects, project_services, payments, expenses, project_links, activity_log, app_settings, time_entries, reminders, site_checks (+ tabelas `lf_*`). Migrações já aplicadas: schema inicial, links/config/2FA obrigatório, cadastro único, lead finder, `central_fase2` (18/11/2026, arquivo em `supabase/migrations/20261118_central_fase2.sql`).
 
 ## Regras ao mexer no código
 - Todo texto vindo do usuário vai para o HTML via `esc()`. Nunca usar scripts ou handlers inline (a CSP bloqueia).
@@ -41,10 +42,22 @@ vault_keys, clients, projects, project_services, payments, expenses, project_lin
 - Cadastro de segundo usuário: trigger `apenas_um_usuario` em auth.users conferido e ativo.
 - Supabase advisor: só resta "Leaked Password Protection" desligado (precisa de plano Pro; ignorar no plano gratuito).
 
-## Pendências / ideias para a fase 2 (em ordem de utilidade)
-1. ~~Restaurar backup dentro do app~~ FEITO (Ajustes > Backup > Restaurar de arquivo; mescla por id via upsert, não apaga, não mexe no cofre). Ainda não testado com login real.
-2. Envio automático do backup para o Google Drive (exige credencial OAuth do Google).
-3. Pix/boleto automático, Gmail, status de deploy do GitHub, cobrança recorrente de manutenção.
+## Fase 2 (18/11/2026)
+- **Pix**: `extras.js` gera o BR Code (CRC16 conferido com o exemplo do Banco Central) e o QR em SVG. Usa `pix_key`, `business_name` e `pix_city` de app_settings. Botão "Pix" em cada pagamento pendente e "Pix de R$ X" no resumo do projeto; a mensagem "Cobrar pagamento" leva o copia e cola.
+- **Lead vira cliente**: botão "Virou cliente" na ficha do lead (`convertLead` no app.js, passado ao leads.js pelo `LF.init`). Cria cliente + projeto com `lead_id`, marca o lead como venda concluída e registra no histórico.
+- **Mensalidades**: projeto tem `monthly_fee`, `monthly_day`, `monthly_start`, `monthly_end`. `ensureMonthly()` (no loadAll) cria um pagamento `kind='mensalidade'` com `ref_month` por mês até o atual (índice único project_id+kind+ref_month). Mensalidade NÃO entra no saldo do projeto (`paidOf`), mas entra no faturamento.
+- **Meta do mês** (`app_settings.monthly_goal`) e mensalidades ativas: cartão no Painel.
+- **Checklist de entrega**: modelo em `app_settings.checklist_template` (null = padrão `DEFAULT_CHECKLIST`); marcações em `projects.checklist` ({item: data}). Aba "Entrega" do projeto.
+- **Horas**: tabela `time_entries`; aba "Horas" com cronômetro (localStorage `central.timer`, um por vez, chip flutuante) e lançamento manual; mostra valor por hora.
+- **Lembretes**: tabela `reminders` (cliente, projeto ou lead); página `#/lembretes`, bloco no Painel e alertas. Também lista as próximas ações dos leads (`lf_companies.next_action_at`).
+- **Monitor de sites**: Edge Function `site-check` (`supabase/functions/site-check/`, `verify_jwt` desligado, confere getUser + aal2, mesma proteção SSRF do lf-analyze). Verifica status, tempo, HTTPS e vencimento do domínio (RDAP; registro.br para .br). Roda sozinha 1x/dia ao abrir o app e pelo "verificar agora". Resultados em `site_checks`; alertas no Painel.
+- **Backup no Google Drive**: OAuth do Google só no navegador (token implícito, escopo `drive.file`), retorno em `drive-callback.html` (token na sessionStorage da aba). Precisa de um ID de cliente OAuth criado pelo usuário no Google Cloud (passo a passo em Ajustes > Backup); redirecionamento `.../Central/drive-callback.html`. Envio diário ao abrir o app se o token ainda valer; senão aparece alerta e o botão "Enviar agora". CSP libera `https://www.googleapis.com`.
+- Pendente de teste com login real: tudo da fase 2 foi testado só na prévia com dados de exemplo; a Edge Function `site-check` está publicada mas não foi chamada com sessão real; o Drive depende do ID de cliente do usuário.
+
+## Pendências / ideias
+1. ~~Restaurar backup dentro do app~~ FEITO. Ainda não testado com login real.
+2. ~~Backup no Google Drive~~ FEITO (falta o usuário criar o ID de cliente OAuth).
+3. Boleto/Pix automático com confirmação (exige banco/PSP), Gmail, status de deploy do GitHub.
 
 ## Lead Finder (módulo de prospecção, pessoal — sem relação com a Founders)
 - Arquivos: `leads.js` (telas, CRM), `lead-providers.js` (fontes de dados + normalização). Ligado ao `app.js` por `LF.init/view/actions/forms/onChange`; rota `#/leads` e `#/leads/<id>`.

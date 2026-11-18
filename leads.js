@@ -529,6 +529,7 @@ function vLead(id) {
         ${!blocked && c.phone_norm ? `<a class="btn sm" href="tel:+55${C.esc(c.phone_norm)}">Ligar</a>` : ''}
         ${map ? `<a class="btn sm" href="${C.esc(map)}" target="_blank" rel="noopener noreferrer">Ver no mapa</a>` : ''}
         <button class="btn sm" data-action="lf-next" data-id="${id}">Próxima ação / lembrete</button>
+        ${C.clientForLead(id) ? `<a class="btn sm" href="#/clientes/${C.clientForLead(id).id}">Ver cliente</a>` : blocked ? '' : `<button class="btn sm primary" data-action="lf-to-client" data-id="${id}">Virou cliente</button>`}
       </div></div>
     ${scoreCard(c)}
     ${siteCard(c)}
@@ -675,6 +676,17 @@ export const actions = {
   },
   'lf-confirm': async (el) => { await patchLead(el.dataset.id, { site_confirmed: el.dataset.v || null }); await syncScore(el.dataset.id); C.route(); },
   'lf-analyze': (el) => analyze(el.dataset.id),
+  'lf-to-client': (el) => C.guard(async () => {
+    const c = leadOf(el.dataset.id);
+    if (!c) return;
+    const r = await C.convertLead(c);
+    if (!r) return;
+    if (c.status !== 'venda_concluida') await patchLead(c.id, { status: 'venda_concluida' });
+    await C.sb.from('lf_events').insert({ company_id: c.id, kind: 'sistema', body: 'Virou cliente na Central: ' + r.project.name });
+    delete L.events[c.id];
+    C.toast('Cliente e projeto criados');
+    location.hash = '#/projetos/' + r.project.id;
+  }),
   'lf-tone': (el) => { L.msgTone = el.dataset.t; C.route(); },
   'lf-copy-msg': async () => { await navigator.clipboard.writeText(document.getElementById('lf-msg')?.value || ''); C.toast('Mensagem copiada'); },
   'lf-wa': (el) => {
